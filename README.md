@@ -5,8 +5,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 
-💬 **AI 站长交流群：** [https://t.me/vpsbbq](https://t.me/vpsbbq)
-
 ## 功能特性
 
 - **🌟 [核心强推] 全自动监控与守护机制 (完全无人值守)**

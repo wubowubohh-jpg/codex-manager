@@ -11,6 +11,7 @@ from .base import (
     EmailServiceType
 )
 from .tempmail import TempmailService
+from .generator_email import GeneratorEmailService
 from .outlook import OutlookService
 from .moe_mail import MeoMailEmailService
 from .temp_mail import TempMailService
@@ -18,6 +19,7 @@ from .duck_mail import DuckMailService
 
 # 注册服务
 EmailServiceFactory.register(EmailServiceType.TEMPMAIL, TempmailService)
+EmailServiceFactory.register(EmailServiceType.GENERATOR_EMAIL, GeneratorEmailService)
 EmailServiceFactory.register(EmailServiceType.OUTLOOK, OutlookService)
 EmailServiceFactory.register(EmailServiceType.CUSTOM_DOMAIN, MeoMailEmailService)
 EmailServiceFactory.register(EmailServiceType.TEMP_MAIL, TempMailService)
@@ -49,6 +51,7 @@ __all__ = [
     'EmailServiceType',
     # 服务类
     'TempmailService',
+    'GeneratorEmailService',
     'OutlookService',
     'MeoMailEmailService',
     'TempMailService',

@@ -32,6 +32,7 @@ class TaskStatus(str, Enum):
 class EmailServiceType(str, Enum):
     """邮箱服务类型"""
     TEMPMAIL = "tempmail"
+    GENERATOR_EMAIL = "generator_email"
     OUTLOOK = "outlook"
     CUSTOM_DOMAIN = "custom_domain"
     TEMP_MAIL = "temp_mail"
@@ -102,6 +103,12 @@ EMAIL_SERVICE_DEFAULTS = {
         "base_url": "https://api.tempmail.lol/v2",
         "timeout": 30,
         "max_retries": 3,
+    },
+    "generator_email": {
+        "base_url": "https://generator.email",
+        "timeout": 30,
+        "max_retries": 3,
+        "poll_interval": 6,
     },
     "outlook": {
         "imap_server": "outlook.office365.com",

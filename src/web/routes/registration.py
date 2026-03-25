@@ -291,6 +291,8 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                         "max_retries": settings.tempmail_max_retries,
                         "proxy_url": actual_proxy_url,
                     }
+                elif service_type == EmailServiceType.GENERATOR_EMAIL:
+                    config = _normalize_email_service_config(service_type, email_service_config, actual_proxy_url)
                 elif service_type == EmailServiceType.CUSTOM_DOMAIN:
                     # 检查数据库中是否有可用的自定义域名服务
                     from ...database.models import EmailService as EmailServiceModel
@@ -1054,6 +1056,7 @@ async def get_available_email_services():
 
     返回所有已启用的邮箱服务，包括：
     - tempmail: 临时邮箱（无需配置）
+    - generator_email: 临时邮箱（无需配置）
     - outlook: 已导入的 Outlook 账户
     - custom_domain: 已配置的自定义域名服务
     """
@@ -1064,11 +1067,16 @@ async def get_available_email_services():
     result = {
         "tempmail": {
             "available": True,
-            "count": 1,
+            "count": 2,
             "services": [{
                 "id": None,
                 "name": "Tempmail.lol",
                 "type": "tempmail",
+                "description": "临时邮箱，自动创建"
+            }, {
+                "id": None,
+                "name": "Generator.email",
+                "type": "generator_email",
                 "description": "临时邮箱，自动创建"
             }]
         },

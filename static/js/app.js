@@ -413,9 +413,10 @@ function updateEmailServiceOptions() {
 
         availableServices.tempmail.services.forEach(service => {
             const option = document.createElement('option');
-            option.value = `tempmail:${service.id || 'default'}`;
+            const serviceType = service.type || 'tempmail';
+            option.value = `${serviceType}:${service.id || 'default'}`;
             option.textContent = service.name;
-            option.dataset.type = 'tempmail';
+            option.dataset.type = serviceType;
             optgroup.appendChild(option);
         });
 
@@ -565,6 +566,8 @@ function handleServiceChange(e) {
         if (service) {
             addLog('info', `[系统] 已选择 DuckMail 服务: ${service.name}`);
         }
+    } else if (type === 'generator_email') {
+        addLog('info', '[系统] 已选择 Generator.email 临时邮箱');
     }
 }
 

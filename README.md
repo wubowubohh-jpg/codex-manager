@@ -15,6 +15,7 @@ AI 站长交流群：https://t.me/vpsbbq
 
 - **多邮箱服务支持**
   - Tempmail.lol（临时邮箱，无需配置）
+  - Generator.email（临时邮箱，无需配置）
   - Outlook（IMAP + XOAUTH2，支持批量导入）
   - 自定义域名（两种子类型）
     - **MoeMail**：标准 REST API，配置 API 地址 + API 密钥

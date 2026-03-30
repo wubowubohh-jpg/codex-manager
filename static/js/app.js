@@ -107,6 +107,7 @@ const elements = {
     cpaRegisterBatchCount: document.getElementById('cpa-register-batch-count'),
     cpaSaveConfigBtn: document.getElementById('cpa-save-config-btn'),
     cpaStopTaskBtn: document.getElementById('cpa-stop-task-btn'),
+    cpaForceRemove401Btn: document.getElementById('cpa-force-remove-401-btn'),
     cpaForceCheckBtn: document.getElementById('cpa-force-check-btn'),
 };
 
@@ -264,6 +265,9 @@ function initEventListeners() {
     if (elements.cpaStopTaskBtn) {
         elements.cpaStopTaskBtn.addEventListener('click', handleStopSchedulerTask);
     }
+    if (elements.cpaForceRemove401Btn) {
+        elements.cpaForceRemove401Btn.addEventListener('click', handleForceRemove401Cpa);
+    }
     if (elements.cpaForceCheckBtn) {
         elements.cpaForceCheckBtn.addEventListener('click', handleForceCheckCpa);
     }
@@ -357,6 +361,34 @@ async function handleForceCheckCpa() {
         addLog('error', '[错误] 后台手动测试触发失败: ' + e.message);
     } finally {
         elements.cpaForceCheckBtn.disabled = false;
+    }
+}
+
+async function handleForceRemove401Cpa() {
+    elements.cpaForceRemove401Btn.disabled = true;
+    addLog('info', '[系统] 🚀 正在发起 401/403 快速剔除 (请稍候)...');
+    try {
+        const res = await api.post('/scheduler/trigger-401');
+        if (res.logs && res.logs.length > 0) {
+            res.logs.forEach(msg => {
+                let level = 'info';
+                if (msg.includes('[WARNING]')) level = 'warning';
+                if (msg.includes('[ERROR]')) level = 'error';
+                addLog(level, msg);
+            });
+        } else {
+            addLog('warning', '[系统] 快速剔除执行完毕，但无日志返回！');
+        }
+        if (res.success) {
+            toast.success(res.message || "401/403 快速剔除执行完毕");
+        } else {
+            toast.error(res.message || "执行中发生错误");
+        }
+    } catch (e) {
+        toast.error("触发失败: " + e.message);
+        addLog('error', '[错误] 401/403 快速剔除触发失败: ' + e.message);
+    } finally {
+        elements.cpaForceRemove401Btn.disabled = false;
     }
 }
 

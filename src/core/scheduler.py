@@ -624,7 +624,7 @@ def cancel_auto_register_batches() -> int:
             continue
     return cancelled
 
-def check_cpa_services_401_job(main_loop, manual_logs: list = None):
+def check_cpa_services_401_job(main_loop, manual_logs: list = None, force: bool = False):
     """快速检查并剔除面板标记 401/403 的凭证（不做测活）"""
     global _is_checking_401
     settings = get_settings()
@@ -632,8 +632,12 @@ def check_cpa_services_401_job(main_loop, manual_logs: list = None):
     if not settings.cpa_auto_check_enabled and manual_logs is None:
         return
     if not settings.cpa_auto_check_remove_401:
+        msg = "未启用 401/403 快速剔除，任务跳过。"
+        if manual_logs is not None:
+            manual_logs.append(f"[WARNING] {msg}")
+            append_system_log("warning", msg)
         return
-    if _is_checking:
+    if _is_checking and not force:
         msg = "当前正在执行完整体检任务，401/403 快速剔除本轮跳过。"
         if manual_logs is not None:
             manual_logs.append(f"[WARNING] {msg}")
@@ -646,6 +650,7 @@ def check_cpa_services_401_job(main_loop, manual_logs: list = None):
             append_system_log("warning", msg)
         return
 
+    force_full_check_running = _is_checking and force
     _is_checking_401 = True
 
     def _log(msg: str, level: str = 'info'):
@@ -655,6 +660,8 @@ def check_cpa_services_401_job(main_loop, manual_logs: list = None):
         if manual_logs is not None:
             manual_logs.append(f"[{level.upper()}] {msg}")
 
+    if force_full_check_running:
+        _log("当前正在执行完整体检任务，已按手动请求强制执行 401/403 快速剔除。", "warning")
     _log("开始快速检查 CPA 401/403 标记凭证...")
     try:
         with get_db() as db:

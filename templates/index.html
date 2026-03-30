@@ -305,7 +305,10 @@
                                 <div class="form-group" id="scheduler-group" style="padding-top: var(--spacing-sm); border-top: 1px solid var(--border-light); margin-top: var(--spacing-sm);">
                                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--spacing-xs);">
                                         <label style="font-weight: 500; margin-bottom: 0;">自动监控与注册 (定时 CPA) <span id="cpa-scheduler-status-badge" style="font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; margin-left: 6px;"></span></label>
-                                        <button type="button" class="btn btn-ghost btn-sm" id="cpa-force-check-btn" style="padding: 2px 8px; font-size: 0.75rem;">⚡ 强制体检</button>
+                                        <div style="display: flex; gap: 6px;">
+                                            <button type="button" class="btn btn-ghost btn-sm" id="cpa-force-remove-401-btn" style="padding: 2px 8px; font-size: 0.75rem;">⚡ 快速剔除401/403</button>
+                                            <button type="button" class="btn btn-ghost btn-sm" id="cpa-force-check-btn" style="padding: 2px 8px; font-size: 0.75rem;">⚡ 强制体检</button>
+                                        </div>
                                     </div>
                                     <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 6px;">
                                         <input type="checkbox" id="cpa-auto-check-enabled">

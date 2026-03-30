@@ -863,6 +863,9 @@ async def start_batch_registration(
     if request.mode not in ("parallel", "pipeline"):
         raise HTTPException(status_code=400, detail="模式必须为 parallel 或 pipeline")
 
+    from ...config.settings import get_settings
+    request.concurrency = get_settings().global_concurrency
+
     # 创建批量任务
     batch_id = str(uuid.uuid4())
     task_uuids = []
@@ -1338,6 +1341,9 @@ async def start_outlook_batch_registration(
 
     if request.mode not in ("parallel", "pipeline"):
         raise HTTPException(status_code=400, detail="模式必须为 parallel 或 pipeline")
+
+    from ...config.settings import get_settings
+    request.concurrency = get_settings().global_concurrency
 
     # 过滤掉已注册的邮箱
     actual_service_ids = request.service_ids

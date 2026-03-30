@@ -248,6 +248,12 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         category=SettingCategory.REGISTRATION,
         description="注册间隔最大值（秒）"
     ),
+    "global_concurrency": SettingDefinition(
+        db_key="registration.global_concurrency",
+        default_value=1,
+        category=SettingCategory.REGISTRATION,
+        description="全局并发线程数（控制剔除、注册等）"
+    ),
 
     # 邮箱服务配置
     "email_service_priority": SettingDefinition(
@@ -460,6 +466,7 @@ SETTING_TYPES: Dict[str, Type] = {
     "registration_default_password_length": int,
     "registration_sleep_min": int,
     "registration_sleep_max": int,
+    "global_concurrency": int,
     "email_service_priority": dict,
     "tempmail_timeout": int,
     "tempmail_max_retries": int,
@@ -733,6 +740,7 @@ class Settings(BaseModel):
     registration_default_password_length: int = 12
     registration_sleep_min: int = 5
     registration_sleep_max: int = 30
+    global_concurrency: int = 1
 
     # 邮箱服务配置
     email_service_priority: Dict[str, int] = {"tempmail": 0, "outlook": 1, "custom_domain": 2}

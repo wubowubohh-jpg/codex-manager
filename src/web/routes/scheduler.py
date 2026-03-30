@@ -12,6 +12,7 @@ router = APIRouter()
 class CPASchedulerConfig(BaseModel):
     check_enabled: bool
     check_remove_401: bool = False
+    check_remove_401_interval: int = 3
     check_interval: int
     check_sleep: int
     check_min_remaining_weekly_percent: int = 20
@@ -29,6 +30,7 @@ async def get_cpa_scheduler_config():
     return {
         "check_enabled": settings.cpa_auto_check_enabled,
         "check_remove_401": settings.cpa_auto_check_remove_401,
+        "check_remove_401_interval": settings.cpa_auto_check_remove_401_interval,
         "check_interval": settings.cpa_auto_check_interval,
         "check_sleep": settings.cpa_auto_check_sleep_seconds,
         "check_min_remaining_weekly_percent": settings.cpa_auto_check_min_remaining_weekly_percent,
@@ -60,6 +62,7 @@ async def update_cpa_scheduler_config(request: CPASchedulerConfig, background_ta
     update_settings(
         cpa_auto_check_enabled=request.check_enabled,
         cpa_auto_check_remove_401=request.check_remove_401,
+        cpa_auto_check_remove_401_interval=request.check_remove_401_interval,
         cpa_auto_check_interval=request.check_interval,
         cpa_auto_check_sleep_seconds=request.check_sleep,
         cpa_auto_check_min_remaining_weekly_percent=request.check_min_remaining_weekly_percent,

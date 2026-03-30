@@ -6,6 +6,7 @@ import asyncio
 import logging
 import uuid
 import random
+import threading
 from datetime import datetime
 from typing import List, Optional, Dict, Tuple
 
@@ -27,6 +28,10 @@ router = APIRouter()
 running_tasks: dict = {}
 # 批量任务存储
 batch_tasks: Dict[str, dict] = {}
+
+# 多邮箱轮询指针（单次任务使用）
+_email_service_rr_index = 0
+_email_service_rr_lock = threading.Lock()
 
 
 # ============== Proxy Helper Functions ==============
@@ -63,11 +68,66 @@ def update_proxy_usage(db, proxy_id: Optional[int]):
         crud.update_proxy_last_used(db, proxy_id)
 
 
+def _parse_email_service_value(value: str) -> Tuple[str, Optional[int]]:
+    """解析前端邮箱服务值 (type:id 或 type:default)。"""
+    if not value:
+        raise ValueError("邮箱服务不能为空")
+    parts = value.split(":", 1)
+    service_type = parts[0].strip()
+    if service_type == "outlook_batch":
+        raise ValueError("Outlook 批量注册请使用专用模式")
+    # 校验服务类型
+    EmailServiceType(service_type)
+
+    service_id: Optional[int] = None
+    if len(parts) > 1:
+        raw_id = parts[1].strip()
+        if raw_id and raw_id not in ("default", "all"):
+            try:
+                service_id = int(raw_id)
+            except ValueError:
+                raise ValueError(f"无效的邮箱服务 ID: {raw_id}")
+
+    return service_type, service_id
+
+
+def _normalize_email_service_pool(values: Optional[List[str]]) -> List[Tuple[str, Optional[int]]]:
+    """规范化邮箱服务多选列表，保持原有顺序并去重。"""
+    if not values:
+        return []
+
+    normalized: List[Tuple[str, Optional[int]]] = []
+    seen = set()
+    for raw in values:
+        if not raw:
+            continue
+        service_type, service_id = _parse_email_service_value(raw)
+        key = (service_type, service_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+
+    return normalized
+
+
+def _pick_rr_service(pool: List[Tuple[str, Optional[int]]]) -> Tuple[str, Optional[int]]:
+    """轮询选择邮箱服务（用于单次注册）。"""
+    global _email_service_rr_index
+    if not pool:
+        raise ValueError("邮箱服务列表为空")
+    with _email_service_rr_lock:
+        index = _email_service_rr_index % len(pool)
+        _email_service_rr_index += 1
+        return pool[index]
+
+
 # ============== Pydantic Models ==============
 
 class RegistrationTaskCreate(BaseModel):
     """创建注册任务请求"""
     email_service_type: str = "tempmail"
+    email_service_pool: List[str] = []
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -83,6 +143,7 @@ class BatchRegistrationRequest(BaseModel):
     """批量注册请求"""
     count: int = 1
     email_service_type: str = "tempmail"
+    email_service_pool: List[str] = []
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -591,6 +652,7 @@ async def run_batch_parallel(
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
     concurrency: int,
+    email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
     auto_upload_sub2api: bool = False,
@@ -609,9 +671,13 @@ async def run_batch_parallel(
 
     async def _run_one(idx: int, uuid: str):
         prefix = f"[任务{idx + 1}]"
+        if email_service_pool:
+            service_type, service_id = email_service_pool[idx % len(email_service_pool)]
+        else:
+            service_type, service_id = email_service_type, email_service_id
         async with semaphore:
             await run_registration_task(
-                uuid, email_service_type, proxy, email_service_config, email_service_id,
+                uuid, service_type, proxy, email_service_config, service_id,
                 log_prefix=prefix, batch_id=batch_id,
                 auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
                 auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
@@ -657,6 +723,7 @@ async def run_batch_pipeline(
     interval_min: int,
     interval_max: int,
     concurrency: int,
+    email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
     auto_upload_sub2api: bool = False,
@@ -676,8 +743,12 @@ async def run_batch_pipeline(
 
     async def _run_and_release(idx: int, uuid: str, pfx: str):
         try:
+            if email_service_pool:
+                service_type, service_id = email_service_pool[idx % len(email_service_pool)]
+            else:
+                service_type, service_id = email_service_type, email_service_id
             await run_registration_task(
-                uuid, email_service_type, proxy, email_service_config, email_service_id,
+                uuid, service_type, proxy, email_service_config, service_id,
                 log_prefix=pfx, batch_id=batch_id,
                 auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids or [],
                 auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids or [],
@@ -747,6 +818,7 @@ async def run_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
+    email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
     auto_upload_sub2api: bool = False,
@@ -758,7 +830,7 @@ async def run_batch_registration(
     if mode == "parallel":
         await run_batch_parallel(
             batch_id, task_uuids, email_service_type, proxy,
-            email_service_config, email_service_id, concurrency,
+            email_service_config, email_service_id, concurrency, email_service_pool,
             auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
             auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
             auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids,
@@ -767,7 +839,7 @@ async def run_batch_registration(
         await run_batch_pipeline(
             batch_id, task_uuids, email_service_type, proxy,
             email_service_config, email_service_id,
-            interval_min, interval_max, concurrency,
+            interval_min, interval_max, concurrency, email_service_pool,
             auto_upload_cpa=auto_upload_cpa, cpa_service_ids=cpa_service_ids,
             auto_upload_sub2api=auto_upload_sub2api, sub2api_service_ids=sub2api_service_ids,
             auto_upload_tm=auto_upload_tm, tm_service_ids=tm_service_ids,
@@ -788,14 +860,25 @@ async def start_registration(
     - proxy: 代理地址
     - email_service_config: 邮箱服务配置（outlook 需要提供账户信息）
     """
-    # 验证邮箱服务类型
+    # 优先使用多选邮箱服务池
     try:
-        EmailServiceType(request.email_service_type)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"无效的邮箱服务类型: {request.email_service_type}"
-        )
+        email_service_pool = _normalize_email_service_pool(request.email_service_pool)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if email_service_pool:
+        email_service_type, email_service_id = _pick_rr_service(email_service_pool)
+    else:
+        # 验证邮箱服务类型
+        try:
+            EmailServiceType(request.email_service_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的邮箱服务类型: {request.email_service_type}"
+            )
+        email_service_type = request.email_service_type
+        email_service_id = request.email_service_id
 
     # 创建任务
     task_uuid = str(uuid.uuid4())
@@ -811,10 +894,10 @@ async def start_registration(
     background_tasks.add_task(
         run_registration_task,
         task_uuid,
-        request.email_service_type,
+        email_service_type,
         request.proxy,
         request.email_service_config,
-        request.email_service_id,
+        email_service_id,
         "",
         "",
         request.auto_upload_cpa,
@@ -846,13 +929,24 @@ async def start_batch_registration(
     if request.count < 1 or request.count > 100:
         raise HTTPException(status_code=400, detail="注册数量必须在 1-100 之间")
 
+    # 解析多选邮箱服务
     try:
-        EmailServiceType(request.email_service_type)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"无效的邮箱服务类型: {request.email_service_type}"
-        )
+        email_service_pool = _normalize_email_service_pool(request.email_service_pool)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    email_service_type = request.email_service_type
+    email_service_id = request.email_service_id
+    if email_service_pool:
+        email_service_type, email_service_id = email_service_pool[0]
+    else:
+        try:
+            EmailServiceType(request.email_service_type)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的邮箱服务类型: {request.email_service_type}"
+            )
 
     if request.interval_min < 0 or request.interval_max < request.interval_min:
         raise HTTPException(status_code=400, detail="间隔时间参数无效")
@@ -889,14 +983,15 @@ async def start_batch_registration(
         run_batch_registration,
         batch_id,
         task_uuids,
-        request.email_service_type,
+        email_service_type,
         request.proxy,
         request.email_service_config,
-        request.email_service_id,
+        email_service_id,
         request.interval_min,
         request.interval_max,
         request.concurrency,
         request.mode,
+        email_service_pool,
         request.auto_upload_cpa,
         request.cpa_service_ids,
         request.auto_upload_sub2api,

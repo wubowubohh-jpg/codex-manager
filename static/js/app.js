@@ -38,7 +38,7 @@ let activeBatchId = null;    // 当前活跃的批量任务 ID（用于页面重
 // DOM 元素
 const elements = {
     form: document.getElementById('registration-form'),
-    emailService: document.getElementById('email-service'),
+    emailServiceSelect: document.getElementById('email-service-select'),
     regMode: document.getElementById('reg-mode'),
     regModeGroup: document.getElementById('reg-mode-group'),
     batchCountGroup: document.getElementById('batch-count-group'),
@@ -96,6 +96,7 @@ const elements = {
     // 定时 CPA
     cpaAutoCheckEnabled: document.getElementById('cpa-auto-check-enabled'),
     cpaAutoRemove401: document.getElementById('cpa-auto-remove-401'),
+    cpaCheck401Interval: document.getElementById('cpa-check-401-interval'),
     cpaTestUrl: document.getElementById('cpa-test-url'),
     cpaTestModel: document.getElementById('cpa-test-model'),
     cpaCheckInterval: document.getElementById('cpa-check-interval'),
@@ -126,6 +127,7 @@ async function loadSchedulerConfig() {
         const config = await api.get('/scheduler/config');
         if (elements.cpaAutoCheckEnabled) elements.cpaAutoCheckEnabled.checked = config.check_enabled;
         if (elements.cpaAutoRemove401) elements.cpaAutoRemove401.checked = !!config.check_remove_401;
+        if (elements.cpaCheck401Interval) elements.cpaCheck401Interval.value = config.check_remove_401_interval ?? 3;
         if (elements.cpaTestUrl) elements.cpaTestUrl.value = config.test_url || '';
         if (elements.cpaTestModel) elements.cpaTestModel.value = config.test_model || '';
         if (elements.cpaCheckInterval) elements.cpaCheckInterval.value = config.check_interval;
@@ -231,8 +233,7 @@ function initEventListeners() {
     // 注册模式切换
     elements.regMode.addEventListener('change', handleModeChange);
 
-    // 邮箱服务切换
-    elements.emailService.addEventListener('change', handleServiceChange);
+    // 邮箱服务切换（在渲染多选列表时绑定事件）
 
     // 取消按钮
     elements.cancelBtn.addEventListener('click', handleCancelTask);
@@ -278,6 +279,7 @@ async function handleSaveSchedulerConfig() {
         await api.post('/scheduler/config', {
             check_enabled: elements.cpaAutoCheckEnabled.checked,
             check_remove_401: elements.cpaAutoRemove401 ? elements.cpaAutoRemove401.checked : false,
+            check_remove_401_interval: elements.cpaCheck401Interval ? (parseInt(elements.cpaCheck401Interval.value) || 3) : 3,
             check_interval: parseInt(elements.cpaCheckInterval.value) || 60,
             check_sleep: parseInt(elements.cpaCheckSleep.value) || 0,
             check_min_remaining_weekly_percent: parseInt(elements.cpaCheckMinRemainingWeeklyPercent.value) || 0,
@@ -286,7 +288,7 @@ async function handleSaveSchedulerConfig() {
             register_enabled: elements.cpaAutoRegisterEnabled.checked,
             register_threshold: parseInt(elements.cpaRegisterThreshold.value) || 10,
             register_batch_count: parseInt(elements.cpaRegisterBatchCount.value) || 5,
-            email_service: elements.emailService ? elements.emailService.value : "",
+            email_service: getPrimaryEmailServiceValue(),
         });
         toast.success("自动任务配置已保存");
         addLog('success', '[系统] 定时 CPA 任务及注册配置已保存');
@@ -307,6 +309,7 @@ async function handleStopSchedulerTask() {
         await api.post('/scheduler/config', {
             check_enabled: false,
             check_remove_401: elements.cpaAutoRemove401 ? elements.cpaAutoRemove401.checked : false,
+            check_remove_401_interval: elements.cpaCheck401Interval ? (parseInt(elements.cpaCheck401Interval.value) || 3) : 3,
             check_interval: parseInt(elements.cpaCheckInterval.value) || 60,
             check_sleep: parseInt(elements.cpaCheckSleep.value) || 0,
             check_min_remaining_weekly_percent: parseInt(elements.cpaCheckMinRemainingWeeklyPercent.value) || 0,
@@ -405,174 +408,174 @@ async function loadAvailableServices() {
     }
 }
 
-// 更新邮箱服务选择框
+// 更新邮箱服务选择框（多选）
 function updateEmailServiceOptions() {
-    const select = elements.emailService;
-    select.innerHTML = '';
+    const container = elements.emailServiceSelect;
+    if (!container) return;
 
-    // Tempmail
-    if (availableServices.tempmail.available) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = '🌐 临时邮箱';
+    const items = [];
 
-        availableServices.tempmail.services.forEach(service => {
-            const option = document.createElement('option');
-            const serviceType = service.type || 'tempmail';
-            option.value = `${serviceType}:${service.id || 'default'}`;
-            option.textContent = service.name;
-            option.dataset.type = serviceType;
-            optgroup.appendChild(option);
-        });
+    const addGroup = (label, services, builder, emptyText) => {
+        items.push(`<div class="msd-group">${label}</div>`);
+        if (!services || services.length === 0) {
+            items.push(`<div class="msd-empty">${emptyText}</div>`);
+            return;
+        }
+        services.forEach(service => items.push(builder(service)));
+    };
 
-        select.appendChild(optgroup);
-    }
+    // 临时邮箱
+    const tempmailServices = availableServices.tempmail?.services || [];
+    addGroup('🌐 临时邮箱', tempmailServices, (service) => {
+        const serviceType = service.type || 'tempmail';
+        const value = `${serviceType}:${service.id || 'default'}`;
+        return `<label class="msd-item">
+            <input type="checkbox" value="${value}" data-type="${serviceType}">
+            <span>${escapeHtml(service.name)}</span>
+        </label>`;
+    }, '暂无可用服务');
 
     // Outlook
-    if (availableServices.outlook.available) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = `📧 Outlook (${availableServices.outlook.count} 个账户)`;
+    const outlookServices = availableServices.outlook?.services || [];
+    addGroup(`📧 Outlook (${availableServices.outlook?.count || 0} 个账户)`, outlookServices, (service) => {
+        const value = `outlook:${service.id}`;
+        const label = service.name + (service.has_oauth ? ' (OAuth)' : '');
+        return `<label class="msd-item">
+            <input type="checkbox" value="${value}" data-type="outlook" data-service-id="${service.id}">
+            <span>${escapeHtml(label)}</span>
+        </label>`;
+    }, '请先在邮箱服务页面导入账户');
 
-        availableServices.outlook.services.forEach(service => {
-            const option = document.createElement('option');
-            option.value = `outlook:${service.id}`;
-            option.textContent = service.name + (service.has_oauth ? ' (OAuth)' : '');
-            option.dataset.type = 'outlook';
-            option.dataset.serviceId = service.id;
-            optgroup.appendChild(option);
-        });
-
-        select.appendChild(optgroup);
-
-        // Outlook 批量注册选项
-        const batchOption = document.createElement('option');
-        batchOption.value = 'outlook_batch:all';
-        batchOption.textContent = `📋 Outlook 批量注册 (${availableServices.outlook.count} 个账户)`;
-        batchOption.dataset.type = 'outlook_batch';
-        optgroup.appendChild(batchOption);
-    } else {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = '📧 Outlook (未配置)';
-
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = '请先在邮箱服务页面导入账户';
-        option.disabled = true;
-        optgroup.appendChild(option);
-
-        select.appendChild(optgroup);
+    if (availableServices.outlook?.available) {
+        items.push(`<label class="msd-item">
+            <input type="checkbox" value="outlook_batch:all" data-type="outlook_batch" data-batch="1">
+            <span>📋 Outlook 批量注册 (${availableServices.outlook.count} 个账户)</span>
+        </label>`);
     }
 
     // 自定义域名
-    if (availableServices.custom_domain.available) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = `🔗 自定义域名 (${availableServices.custom_domain.count} 个服务)`;
+    const customServices = availableServices.custom_domain?.services || [];
+    addGroup(`🔗 自定义域名 (${availableServices.custom_domain?.count || 0} 个服务)`, customServices, (service) => {
+        const value = `custom_domain:${service.id || 'default'}`;
+        const label = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
+        return `<label class="msd-item">
+            <input type="checkbox" value="${value}" data-type="custom_domain" ${service.id ? `data-service-id="${service.id}"` : ''}>
+            <span>${escapeHtml(label)}</span>
+        </label>`;
+    }, '请先在邮箱服务页面添加服务');
 
-        availableServices.custom_domain.services.forEach(service => {
-            const option = document.createElement('option');
-            option.value = `custom_domain:${service.id || 'default'}`;
-            option.textContent = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
-            option.dataset.type = 'custom_domain';
-            if (service.id) {
-                option.dataset.serviceId = service.id;
-            }
-            optgroup.appendChild(option);
-        });
-
-        select.appendChild(optgroup);
-    } else {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = '🔗 自定义域名 (未配置)';
-
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = '请先在邮箱服务页面添加服务';
-        option.disabled = true;
-        optgroup.appendChild(option);
-
-        select.appendChild(optgroup);
-    }
-
-    // Temp-Mail（自部署）
-    if (availableServices.temp_mail && availableServices.temp_mail.available) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = `📮 Temp-Mail 自部署 (${availableServices.temp_mail.count} 个服务)`;
-
-        availableServices.temp_mail.services.forEach(service => {
-            const option = document.createElement('option');
-            option.value = `temp_mail:${service.id}`;
-            option.textContent = service.name + (service.domain ? ` (@${service.domain})` : '');
-            option.dataset.type = 'temp_mail';
-            option.dataset.serviceId = service.id;
-            optgroup.appendChild(option);
-        });
-
-        select.appendChild(optgroup);
+    // Temp-Mail 自部署
+    if (availableServices.temp_mail?.available) {
+        addGroup(`📮 Temp-Mail 自部署 (${availableServices.temp_mail.count} 个服务)`, availableServices.temp_mail.services, (service) => {
+            const value = `temp_mail:${service.id}`;
+            const label = service.name + (service.domain ? ` (@${service.domain})` : '');
+            return `<label class="msd-item">
+                <input type="checkbox" value="${value}" data-type="temp_mail" data-service-id="${service.id}">
+                <span>${escapeHtml(label)}</span>
+            </label>`;
+        }, '暂无可用服务');
     }
 
     // DuckMail
-    if (availableServices.duck_mail && availableServices.duck_mail.available) {
-        const optgroup = document.createElement('optgroup');
-        optgroup.label = `🦆 DuckMail (${availableServices.duck_mail.count} 个服务)`;
-
-        availableServices.duck_mail.services.forEach(service => {
-            const option = document.createElement('option');
-            option.value = `duck_mail:${service.id}`;
-            option.textContent = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
-            option.dataset.type = 'duck_mail';
-            option.dataset.serviceId = service.id;
-            optgroup.appendChild(option);
-        });
-
-        select.appendChild(optgroup);
+    if (availableServices.duck_mail?.available) {
+        addGroup(`🦆 DuckMail (${availableServices.duck_mail.count} 个服务)`, availableServices.duck_mail.services, (service) => {
+            const value = `duck_mail:${service.id}`;
+            const label = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
+            return `<label class="msd-item">
+                <input type="checkbox" value="${value}" data-type="duck_mail" data-service-id="${service.id}">
+                <span>${escapeHtml(label)}</span>
+            </label>`;
+        }, '暂无可用服务');
     }
+
+    const ddId = `${container.id}-dd`;
+    container.innerHTML = `
+        <div class="msd-dropdown" id="${ddId}">
+            <div class="msd-trigger" onclick="toggleMsd('${ddId}')">
+                <span class="msd-label">请选择邮箱服务</span>
+                <span class="msd-arrow">▼</span>
+            </div>
+            <div class="msd-list">${items.join('')}</div>
+        </div>
+    `;
+
+    // 默认选中第一个非批量服务
+    const allCheckboxes = container.querySelectorAll('.msd-item input[type=checkbox]');
+    const checked = container.querySelectorAll('.msd-item input[type=checkbox]:checked');
+    if (checked.length === 0) {
+        const firstNormal = Array.from(allCheckboxes).find(cb => cb.value !== 'outlook_batch:all');
+        if (firstNormal) firstNormal.checked = true;
+    }
+
+    // 绑定事件
+    allCheckboxes.forEach(cb => cb.addEventListener('change', handleEmailServiceSelectionChange));
+
+    // 点击外部关闭
+    document.addEventListener('click', (e) => {
+        const dd = document.getElementById(ddId);
+        if (dd && !dd.contains(e.target)) dd.classList.remove('open');
+    }, true);
+
+    syncEmailServiceSelectionState();
 }
 
-// 处理邮箱服务切换
-function handleServiceChange(e) {
-    const value = e.target.value;
-    if (!value) return;
+function getSelectedEmailServiceValues() {
+    const container = elements.emailServiceSelect;
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('.msd-item input:checked'))
+        .map(cb => cb.value)
+        .filter(Boolean);
+}
 
-    const [type, id] = value.split(':');
-    // 处理 Outlook 批量注册模式
-    if (type === 'outlook_batch') {
+function getPrimaryEmailServiceValue() {
+    const values = getSelectedEmailServiceValues().filter(v => v !== 'outlook_batch:all');
+    return values.length > 0 ? values[0] : "";
+}
+
+function handleEmailServiceSelectionChange(e) {
+    const target = e.target;
+    if (!target) return;
+
+    const isBatchOption = target.value === 'outlook_batch:all';
+    if (isBatchOption && target.checked) {
+        // 选择批量注册时，清理其他选择
+        const others = elements.emailServiceSelect.querySelectorAll('.msd-item input');
+        others.forEach(cb => {
+            if (cb.value !== 'outlook_batch:all') cb.checked = false;
+        });
+    } else if (!isBatchOption) {
+        // 选择普通服务时，取消批量注册勾选
+        const batchCb = elements.emailServiceSelect.querySelector('input[value="outlook_batch:all"]');
+        if (batchCb && batchCb.checked) batchCb.checked = false;
+    }
+
+    syncEmailServiceSelectionState(true);
+}
+
+function syncEmailServiceSelectionState(emitLog = false) {
+    const values = getSelectedEmailServiceValues();
+    const batchOnly = values.length === 1 && values[0] === 'outlook_batch:all';
+
+    if (batchOnly) {
         isOutlookBatchMode = true;
         elements.outlookBatchSection.style.display = 'block';
         elements.regModeGroup.style.display = 'none';
         elements.batchCountGroup.style.display = 'none';
         elements.batchOptions.style.display = 'none';
         loadOutlookAccounts();
-        addLog('info', '[系统] 已切换到 Outlook 批量注册模式');
-        return;
+        if (emitLog) addLog('info', '[系统] 已切换到 Outlook 批量注册模式');
     } else {
+        if (isOutlookBatchMode && emitLog) {
+            addLog('info', '[系统] 已退出 Outlook 批量注册模式');
+        }
         isOutlookBatchMode = false;
         elements.outlookBatchSection.style.display = 'none';
         elements.regModeGroup.style.display = 'block';
+        elements.batchCountGroup.style.display = isBatchMode ? 'block' : 'none';
+        elements.batchOptions.style.display = isBatchMode ? 'block' : 'none';
     }
 
-    // 显示服务信息
-    if (type === 'outlook') {
-        const service = availableServices.outlook.services.find(s => s.id == id);
-        if (service) {
-            addLog('info', `[系统] 已选择 Outlook 账户: ${service.name}`);
-        }
-    } else if (type === 'custom_domain') {
-        const service = availableServices.custom_domain.services.find(s => s.id == id);
-        if (service) {
-            addLog('info', `[系统] 已选择自定义域名服务: ${service.name}`);
-        }
-    } else if (type === 'temp_mail') {
-        const service = availableServices.temp_mail.services.find(s => s.id == id);
-        if (service) {
-            addLog('info', `[系统] 已选择 Temp-Mail 自部署服务: ${service.name}`);
-        }
-    } else if (type === 'duck_mail') {
-        const service = availableServices.duck_mail.services.find(s => s.id == id);
-        if (service) {
-            addLog('info', `[系统] 已选择 DuckMail 服务: ${service.name}`);
-        }
-    } else if (type === 'generator_email') {
-        addLog('info', '[系统] 已选择 Generator.email 临时邮箱');
-    }
+    updateMsdLabel(`${elements.emailServiceSelect.id}-dd`);
 }
 
 // 模式切换
@@ -600,19 +603,20 @@ function handleConcurrencyModeChange(selectEl, hintEl, intervalGroupEl) {
 async function handleStartRegistration(e) {
     e.preventDefault();
 
-    const selectedValue = elements.emailService.value;
-    if (!selectedValue) {
+    const selectedValues = getSelectedEmailServiceValues();
+    if (selectedValues.length === 0) {
         toast.error('请选择一个邮箱服务');
         return;
     }
 
     // 处理 Outlook 批量注册模式
-    if (isOutlookBatchMode) {
+    if (selectedValues.includes('outlook_batch:all') || isOutlookBatchMode) {
         await handleOutlookBatchRegistration();
         return;
     }
 
-    const [emailServiceType, serviceId] = selectedValue.split(':');
+    const emailServicePool = selectedValues.filter(v => v !== 'outlook_batch:all');
+    const [emailServiceType, serviceId] = (emailServicePool[0] || '').split(':');
 
     // 禁用开始按钮
     elements.startBtn.disabled = true;
@@ -635,6 +639,11 @@ async function handleStartRegistration(e) {
     // 如果选择了数据库中的服务，传递 service_id
     if (serviceId && serviceId !== 'default') {
         requestData.email_service_id = parseInt(serviceId);
+    }
+
+    if (emailServicePool.length > 1) {
+        requestData.email_service_pool = emailServicePool;
+        addLog('info', `[系统] 已选择 ${emailServicePool.length} 个邮箱服务，启用轮询模式`);
     }
 
     if (isBatchMode) {

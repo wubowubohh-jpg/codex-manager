@@ -5,7 +5,7 @@ services:
     build: .
     container_name: codex-manager
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "8096:8000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -13,7 +13,7 @@ services:
       - PYTHONUNBUFFERED=1
       # Web UI 配置（也可在 .env 文件中设置）
       - APP_HOST=0.0.0.0
-      - APP_PORT=${APP_PORT:-8000}
+      - APP_PORT=8000
       - APP_ACCESS_PASSWORD=${APP_ACCESS_PASSWORD:-admin123}
       # 数据库（默认 SQLite，如需 PostgreSQL 取消下方注释）
       # - APP_DATABASE_URL=postgresql://user:password@db:5432/codex

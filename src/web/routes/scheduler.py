@@ -113,7 +113,7 @@ async def trigger_cpa_scheduler_check():
 
 @router.post("/trigger-401")
 async def trigger_cpa_scheduler_remove_401():
-    """手动触发一次 401/403 快速剔除并返回结果日志"""
+    """手动触发一次 401/403/usage_limit_reached 快速剔除并返回结果日志"""
     from ...core.scheduler import check_cpa_services_401_job
 
     manual_logs = []
@@ -121,11 +121,11 @@ async def trigger_cpa_scheduler_remove_401():
         return {
             "success": False,
             "logs": manual_logs,
-            "message": "请先勾选“直接剔除面板明确报错的凭证（401、403）”"
+            "message": "请先勾选“直接剔除面板明确报错的凭证（401、403、usage_limit_reached）”"
         }
     try:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, check_cpa_services_401_job, None, manual_logs, True)
-        return {"success": True, "logs": manual_logs, "message": "401/403 快速剔除执行完毕！"}
+        return {"success": True, "logs": manual_logs, "message": "401/403/usage_limit_reached 快速剔除执行完毕！"}
     except Exception as e:
         return {"success": False, "logs": manual_logs, "message": str(e)}

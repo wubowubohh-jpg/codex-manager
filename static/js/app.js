@@ -372,7 +372,7 @@ async function handleForceCheckCpa() {
 
 async function handleForceRemove401Cpa() {
     elements.cpaForceRemove401Btn.disabled = true;
-    addLog('info', '[系统] 🚀 正在发起 401/403 快速剔除 (请稍候)...');
+    addLog('info', '[系统] 🚀 正在发起 401/403/usage_limit_reached 快速剔除 (请稍候)...');
     try {
         const res = await api.post('/scheduler/trigger-401');
         if (res.logs && res.logs.length > 0) {
@@ -386,13 +386,13 @@ async function handleForceRemove401Cpa() {
             addLog('warning', '[系统] 快速剔除执行完毕，但无日志返回！');
         }
         if (res.success) {
-            toast.success(res.message || "401/403 快速剔除执行完毕");
+            toast.success(res.message || "401/403/usage_limit_reached 快速剔除执行完毕");
         } else {
             toast.error(res.message || "执行中发生错误");
         }
     } catch (e) {
         toast.error("触发失败: " + e.message);
-        addLog('error', '[错误] 401/403 快速剔除触发失败: ' + e.message);
+        addLog('error', '[错误] 401/403/usage_limit_reached 快速剔除触发失败: ' + e.message);
     } finally {
         elements.cpaForceRemove401Btn.disabled = false;
     }

@@ -364,7 +364,7 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         db_key="cpa.auto_check_remove_401",
         default_value=False,
         category=SettingCategory.CPA,
-        description="是否直接剔除面板标记为 401/403 的凭证（跳过测活）"
+        description="是否直接剔除面板标记为 401/403/usage_limit_reached 的凭证（跳过测活）"
     ),
     "cpa_auto_check_remove_401_interval": SettingDefinition(
         db_key="cpa.auto_check_remove_401_interval",

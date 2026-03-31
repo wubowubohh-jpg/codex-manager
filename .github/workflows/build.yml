@@ -103,18 +103,20 @@ jobs:
         run: |
           mkdir -p release
           # 为每个平台二进制文件打包成 zip
-          find dist/ -type f | while read f; do
-            name=$(basename "$f")
-            # 根据文件名确定平台标识
-            case "$name" in
-              *windows*) platform=$(echo "$name" | sed 's/\.[^.]*$//') ;;
-              *linux*)   platform="$name" ;;
-              *macos*)   platform="$name" ;;
-              *)         platform="$name" ;;
-            esac
+          for dir in dist/*; do
+            if [ ! -d "$dir" ]; then
+              continue
+            fi
+            platform=$(basename "$dir")
+            # Windows 产物目录名可能带 .exe，去掉后作为 zip 名
+            platform="${platform%.exe}"
             tmpdir="tmp_${platform}"
             mkdir -p "$tmpdir"
-            cp "$f" "$tmpdir/"
+            for f in "$dir"/*; do
+              if [ -f "$f" ]; then
+                cp "$f" "$tmpdir/"
+              fi
+            done
             cp README.md "$tmpdir/README.md"
             cp .env.example "$tmpdir/.env.example"
             [ -f VERSION ] && cp VERSION "$tmpdir/VERSION" || true
@@ -139,9 +141,9 @@ jobs:
             ### 下载说明
             | 平台 | 文件 |
             |------|------|
-            | Windows x64 | `codex-register-windows-x64.exe` |
-            | Linux x64 | `codex-register-linux-x64` |
-            | macOS ARM64 | `codex-register-macos-arm64` |
+            | Windows x64 | `codex-register-windows-x64.zip` |
+            | Linux x64 | `codex-register-linux-x64.zip` |
+            | macOS ARM64 | `codex-register-macos-arm64.zip` |
 
             ### 使用方法
             ```bash

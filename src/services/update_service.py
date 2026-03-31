@@ -216,8 +216,20 @@ class UpdateService:
     def _resolve_work_paths(self) -> tuple[Path, Path, Path, Path]:
         settings = get_settings()
         work_root = Path(settings.self_update_work_dir or "data/self_update").expanduser()
-        if not work_root.is_absolute():
-            work_root = Path.cwd() / work_root
+        if work_root.is_absolute():
+            work_root = self._normalize_self_update_path(work_root)
+        else:
+            base_root = self._normalize_self_update_path(Path.cwd())
+            parts = list(work_root.parts)
+            if base_root.name == "self_update":
+                if parts[:2] == ["data", "self_update"]:
+                    work_root = base_root
+                elif parts[:1] == ["self_update"]:
+                    work_root = base_root
+                else:
+                    work_root = base_root / work_root
+            else:
+                work_root = base_root / work_root
         workspace_dir = work_root / "workspace"
         current_dir = work_root / "current"
         backup_dir = work_root / "previous"

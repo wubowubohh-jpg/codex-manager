@@ -315,6 +315,22 @@ def test_handle_about_you_treats_409_as_continue(monkeypatch):
     assert callback_counter["count"] == 1
 
 
+def test_handle_about_you_treats_registration_disallowed_400_as_continue(monkeypatch):
+    email_service = FakeEmailService(["123456"])
+    engine = RegistrationEngine(email_service)
+
+    callback_counter = {"count": 0}
+
+    engine.create_account = lambda name, birthdate, so_token=None: (
+        400,
+        {"error": "registration_disallowed"},
+    )
+    engine.callback = lambda: callback_counter.__setitem__("count", callback_counter["count"] + 1)
+
+    assert engine._handle_about_you("登录密码阶段") is True
+    assert callback_counter["count"] == 1
+
+
 def test_oauth_login_flow_about_you_can_continue_without_waiting_otp(monkeypatch):
     email_service = FakeEmailService(["123456"])
     engine = RegistrationEngine(email_service)

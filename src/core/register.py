@@ -2031,6 +2031,35 @@ class RegistrationEngine:
                 except Exception as cb_err:
                     self._log(f"about-you 超时后的回调阶段异常（忽略继续）: {cb_err}", "warning")
                 return True
+            if status in (400, 403, 422):
+                details = ""
+                if isinstance(data, dict):
+                    try:
+                        details = json.dumps(data, ensure_ascii=False)
+                    except Exception:
+                        details = str(data)
+                else:
+                    details = str(data or "")
+                normalized = details.lower()
+                non_blocking_markers = (
+                    "registration_disallowed",
+                    "already_exists",
+                    "already exists",
+                    "already_completed",
+                    "already complete",
+                    "profile_completed",
+                    "profile complete",
+                )
+                if any(marker in normalized for marker in non_blocking_markers):
+                    self._log(
+                        f"about-you 返回 {status} 且命中非阻断标记，继续 OAuth 授权链路",
+                        "warning",
+                    )
+                    try:
+                        self.callback()
+                    except Exception as cb_err:
+                        self._log(f"about-you 非阻断分支回调异常（忽略继续）: {cb_err}", "warning")
+                    return True
             self._log(f"about-you 提交失败: HTTP {status}", "warning")
             return False
         except Exception as e:

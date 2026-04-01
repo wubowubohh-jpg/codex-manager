@@ -1058,7 +1058,11 @@ class RegistrationEngine:
                 r'"workspace_id"\s*:\s*"([^"]+)"',
                 r'"workspaceId"\s*:\s*"([^"]+)"',
                 r'"default_workspace_id"\s*:\s*"([^"]+)"',
+                r'"defaultWorkspaceId"\s*:\s*"([^"]+)"',
                 r'"workspaces"\s*:\s*\[\s*\{\s*"id"\s*:\s*"([^"]+)"',
+                r'"workspaces"\s*:\s*\[[^\]]*?"id"\s*:\s*"([^"]+)"',
+                r'"workspace"\s*:\s*\{[^\}]*?"id"\s*:\s*"([^"]+)"',
+                r'workspace_id=([0-9a-fA-F-]{8,})',
             )
             for pattern in patterns:
                 match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -1920,6 +1924,49 @@ class RegistrationEngine:
         if "." in raw_value:
             candidates.extend(str(raw_value).split("."))
 
+        # 先走轻量级正则提取，兼容非 JWT cookie 结构
+        raw_decoded_candidates = []
+        for item in candidates:
+            try:
+                raw_decoded_candidates.append(unquote(str(item)))
+            except Exception:
+                raw_decoded_candidates.append(str(item))
+
+        regex_patterns = (
+            r'"workspace_id"\s*:\s*"([^"]+)"',
+            r'"workspaceId"\s*:\s*"([^"]+)"',
+            r'"default_workspace_id"\s*:\s*"([^"]+)"',
+            r'"defaultWorkspaceId"\s*:\s*"([^"]+)"',
+            r'"workspaces"\s*:\s*\[[^\]]*?"id"\s*:\s*"([^"]+)"',
+            r'"workspace"\s*:\s*\{[^\}]*?"id"\s*:\s*"([^"]+)"',
+            r'workspace_id=([0-9a-fA-F-]{8,})',
+        )
+        for candidate in raw_decoded_candidates:
+            for pattern in regex_patterns:
+                match = re.search(pattern, candidate, flags=re.IGNORECASE)
+                if match:
+                    workspace_id = str(match.group(1) or "").strip()
+                    if workspace_id:
+                        return workspace_id
+
+        # 再尝试直接解析 JSON（兼容 URL 编码后 JSON 字符串）
+        for candidate in raw_decoded_candidates:
+            value = str(candidate or "").strip()
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
+            if not value:
+                continue
+            try:
+                payload = json.loads(value)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict):
+                ws_from_payload = self._extract_workspace_id_from_payload(payload)
+                if ws_from_payload:
+                    return ws_from_payload
+
         for candidate in candidates:
             payload = self._decode_oauth_session_cookie(candidate)
             if not isinstance(payload, dict):
@@ -1939,11 +1986,53 @@ class RegistrationEngine:
 
         return None
 
+    def _extract_workspace_id_from_response_headers(self, headers: Any) -> Optional[str]:
+        """从响应头(Set-Cookie 等)提取 workspace_id。"""
+        if not headers:
+            return None
+        try:
+            header_items = []
+            for k, v in getattr(headers, "items", lambda: [])():
+                header_items.append(f"{k}: {v}")
+            header_blob = "\n".join(header_items)
+
+            # 先尝试从头里直接抓 workspace_id 字段
+            direct_patterns = (
+                r'"workspace_id"\s*:\s*"([^"]+)"',
+                r'"workspaceId"\s*:\s*"([^"]+)"',
+                r'"default_workspace_id"\s*:\s*"([^"]+)"',
+                r'"defaultWorkspaceId"\s*:\s*"([^"]+)"',
+                r'workspace_id=([0-9a-fA-F-]{8,})',
+            )
+            for pattern in direct_patterns:
+                match = re.search(pattern, header_blob, flags=re.IGNORECASE)
+                if match:
+                    workspace_id = str(match.group(1) or "").strip()
+                    if workspace_id:
+                        return workspace_id
+
+            # 再尝试提取 auth session cookie 再解码
+            cookie_patterns = (
+                r'oai-client-auth-session=([^;\n]+)',
+                r'oai_client_auth_session=([^;\n]+)',
+                r'oai-client-auth-info=([^;\n]+)',
+                r'oai_client_auth_info=([^;\n]+)',
+            )
+            for pattern in cookie_patterns:
+                for match in re.findall(pattern, header_blob, flags=re.IGNORECASE):
+                    ws_id = self._extract_workspace_id_from_cookie(str(match))
+                    if ws_id:
+                        return ws_id
+        except Exception:
+            return None
+        return None
+
     def _oauth_get_workspace_id(
         self,
         session: cffi_requests.Session,
         consent_url: str = "",
         authorize_url: str = "",
+        probe_pages: bool = True,
     ) -> Optional[str]:
         """获取 Workspace ID（OAuth 登录流程）。"""
         try:
@@ -1961,6 +2050,9 @@ class RegistrationEngine:
                         self._log(f"Workspace ID: {workspace_id} (from {cookie_name})")
                         return workspace_id
 
+            if not probe_pages:
+                return None
+
             page_candidates = []
             if authorize_url:
                 page_candidates.append(authorize_url)
@@ -1968,9 +2060,25 @@ class RegistrationEngine:
                 page_candidates.append(consent_url)
             page_candidates.append(f"{self.oauth_issuer}/sign-in-with-chatgpt/codex/consent")
             pattern = re.compile(r'"workspace_id"\s*:\s*"([^"]+)"')
+            page_debug: list[str] = []
             for page_url in page_candidates:
                 try:
                     response = session.get(page_url, timeout=15)
+                    ws_from_headers = self._extract_workspace_id_from_response_headers(response.headers)
+                    if ws_from_headers:
+                        self._log(f"Workspace ID: {ws_from_headers} (from headers)")
+                        return ws_from_headers
+
+                    try:
+                        ws_from_url = parse_qs(urlparse(str(response.url)).query).get("workspace_id", [None])[0]
+                    except Exception:
+                        ws_from_url = None
+                    if ws_from_url:
+                        ws_from_url = str(ws_from_url).strip()
+                        if ws_from_url:
+                            self._log(f"Workspace ID: {ws_from_url} (from url)")
+                            return ws_from_url
+
                     workspace_id_from_html = self._extract_workspace_id_from_html(response.text or "")
                     if workspace_id_from_html:
                         self._log(f"Workspace ID: {workspace_id_from_html} (from html)")
@@ -1981,9 +2089,29 @@ class RegistrationEngine:
                         if workspace_id:
                             self._log(f"Workspace ID: {workspace_id} (from page)")
                             return workspace_id
+                    page_debug.append(
+                        f"url={str(response.url)[:110]} status={response.status_code} text_len={len(response.text or '')}"
+                    )
                 except Exception:
+                    page_debug.append(f"url={page_url[:110]} status=ERR")
                     continue
 
+            # 失败时输出诊断信息，便于定位不同账号/风控场景的结构差异
+            try:
+                cookie_names: list[str] = []
+                jar = getattr(session.cookies, "jar", None)
+                if jar is not None:
+                    for item in list(jar):
+                        name = str(getattr(item, "name", "") or "").strip()
+                        if name:
+                            cookie_names.append(name)
+                cookie_names = sorted(set(cookie_names))
+                if cookie_names:
+                    self._log(f"Workspace 提取失败，当前 Cookie 名称: {', '.join(cookie_names[:20])}", "warning")
+            except Exception:
+                pass
+            if page_debug:
+                self._log(f"Workspace 提取失败，页面探测: {' | '.join(page_debug)}", "warning")
             self._log("未能从 Cookie/页面提取 workspace_id", "error")
             return None
 
@@ -2003,13 +2131,32 @@ class RegistrationEngine:
                 data=json.dumps({"workspace_id": workspace_id}),
             )
 
+            if response.status_code in (301, 302, 303, 307, 308):
+                loc = str(response.headers.get("Location") or "").strip()
+                if loc:
+                    self._log(f"workspace/select 重定向到: {loc[:100]}...")
+                    return loc
+
             if response.status_code != 200:
                 self._log(f"选择 workspace 失败: {response.status_code}", "error")
                 self._log(f"响应: {response.text[:200]}", "warning")
                 return None
 
-            continue_url = str((response.json() or {}).get("continue_url") or "").strip()
+            data = response.json() if response.text else {}
+            continue_url = str(
+                (data or {}).get("continue_url")
+                or (data or {}).get("url")
+                or (data or {}).get("redirect_url")
+                or (data or {}).get("next_url")
+                or ""
+            ).strip()
             if not continue_url:
+                fallback_callback = self._extract_redirect_from_html(response.text or "", self.oauth_redirect_uri)
+                if fallback_callback:
+                    return fallback_callback
+                fallback_nav = self._extract_navigation_url_from_html(response.text or "", base_url=str(response.url))
+                if fallback_nav:
+                    return fallback_nav
                 self._log("workspace/select 响应里缺少 continue_url", "error")
                 return None
 
@@ -2138,6 +2285,21 @@ class RegistrationEngine:
                 auth_code = _extract_code_from_url(m.group(1))
 
         # 1) 直接访问 consent，看是否 302 带 code
+        #    先按参考项目思路：优先尝试直接拿 workspace_id -> workspace/select，绕开 consent 表单 405
+        if not auth_code:
+            early_workspace_id = self._oauth_get_workspace_id(
+                session,
+                consent_url=consent_url,
+                authorize_url=oauth_start.auth_url,
+                probe_pages=False,
+            )
+            if early_workspace_id:
+                self._log(f"提前提取到 workspace_id: {early_workspace_id}，优先走 workspace/select")
+                early_continue_url = self._oauth_select_workspace(session, early_workspace_id)
+                if early_continue_url:
+                    auth_code = self._oauth_follow_and_extract_code(session, early_continue_url)
+
+        # 2) 直接访问 consent，看是否 302 带 code
         if not auth_code:
             try:
                 resp_consent = session.get(
@@ -2174,7 +2336,7 @@ class RegistrationEngine:
                 if m:
                     auth_code = _extract_code_from_url(m.group(1))
 
-        # 2) 走 workspace / organization 流程
+        # 3) 走 workspace / organization 流程
         if not auth_code:
             workspace_id = self._oauth_get_workspace_id(
                 session,
@@ -2254,7 +2416,7 @@ class RegistrationEngine:
                 except Exception as e:
                     self._log(f"OAuth workspace/organization 处理异常: {e}", "warning")
 
-        # 3) 最后兜底：允许自动重定向
+        # 4) 最后兜底：允许自动重定向
         if not auth_code:
             try:
                 resp_fallback = session.get(

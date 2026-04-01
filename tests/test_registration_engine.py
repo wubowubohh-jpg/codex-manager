@@ -762,6 +762,13 @@ def test_oauth_submit_consent_form_uses_workspace_from_cookie_when_html_missing(
     assert code == "code-cookie-ws-1"
 
 
+def test_extract_workspace_id_from_cookie_supports_plain_json():
+    engine = RegistrationEngine(FakeEmailService(["123456"]))
+    raw_cookie = '{"default_workspace_id":"ws-json-1","workspaces":[{"id":"ws-json-2"}]}'
+    workspace_id = engine._extract_workspace_id_from_cookie(raw_cookie)
+    assert workspace_id == "ws-json-1"
+
+
 def test_oauth_get_workspace_id_falls_back_to_authorize_url_page():
     oauth_auth_url = (
         "https://auth.openai.com/oauth/authorize?"
@@ -787,6 +794,24 @@ def test_oauth_get_workspace_id_falls_back_to_authorize_url_page():
     )
 
     assert workspace_id == "ws-auth-1"
+
+
+def test_oauth_select_workspace_accepts_redirect_location():
+    session = QueueSession([
+        (
+            "POST",
+            OPENAI_API_ENDPOINTS["select_workspace"],
+            DummyResponse(
+                status_code=302,
+                headers={"Location": "http://localhost:1455/auth/callback?code=code-ws-redirect-1&state=state-1"},
+            ),
+        ),
+    ])
+    engine = RegistrationEngine(FakeEmailService(["123456"]))
+
+    continue_url = engine._oauth_select_workspace(session, "ws-redirect-1")
+
+    assert continue_url == "http://localhost:1455/auth/callback?code=code-ws-redirect-1&state=state-1"
 
 
 def test_register_retries_on_transient_502_and_succeeds(monkeypatch):

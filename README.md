@@ -22,11 +22,11 @@ AI 站长交流群：https://t.me/vpsbbq
   - Tempmail.lol（临时邮箱，无需配置）
   - Generator.email（临时邮箱，无需配置）
   - Outlook（IMAP + XOAUTH2，支持批量导入）
-  - 自定义域名（两种子类型）
+  - 自定义邮箱服务（四种子类型）
     - **MoeMail**：标准 REST API，配置 API 地址 + API 密钥
     - **TempMail**：自部署 Cloudflare Worker 临时邮箱，配置 Worker 地址 + Admin 密码
-  - DuckMail
-    - **DuckMail API**：兼容 DuckMail 接口，手动填写 API 地址、默认域名，可选 API Key
+    - **DuckMail**：兼容 DuckMail API，配置 API 地址 + 默认域名，可选 API Key
+    - **CloudMail**：CloudMail API，配置 API 地址 + Token + 邮箱域名
   - 支持**多选邮箱服务轮询**，自动在所选服务间分配请求，降低单服务 429 风险
 
 - **注册模式**

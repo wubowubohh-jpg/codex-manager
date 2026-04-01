@@ -210,6 +210,7 @@
                             <option value="moemail">MoeMail（自定义域名 API）</option>
                             <option value="tempmail">TempMail（自部署 Cloudflare Worker）</option>
                             <option value="duckmail">DuckMail（DuckMail API）</option>
+                            <option value="cloudmail">CloudMail（CloudMail API）</option>
                         </select>
                     </div>
                     <!-- MoeMail 字段 -->
@@ -259,6 +260,21 @@
                         <div class="form-group">
                             <label for="custom-dm-password-length">随机密码长度</label>
                             <input type="number" id="custom-dm-password-length" name="dm_password_length" min="6" max="64" value="12">
+                        </div>
+                    </div>
+                    <!-- CloudMail 字段 -->
+                    <div id="add-cloudmail-fields" style="display:none;">
+                        <div class="form-group">
+                            <label for="custom-cm-base-url">API 地址</label>
+                            <input type="text" id="custom-cm-base-url" name="cm_base_url" placeholder="https://mail.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-cm-api-token">API Token</label>
+                            <input type="password" id="custom-cm-api-token" name="cm_api_token" placeholder="CloudMail Token">
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-cm-domain">邮箱域名</label>
+                            <input type="text" id="custom-cm-domain" name="cm_domain" placeholder="example.com">
                         </div>
                     </div>
                     <div class="form-row">
@@ -352,6 +368,22 @@
                         <div class="form-group">
                             <label for="edit-dm-password-length">随机密码长度</label>
                             <input type="number" id="edit-dm-password-length" name="dm_password_length" min="6" max="64" value="12">
+                        </div>
+                    </div>
+                    <!-- CloudMail 字段 -->
+                    <div id="edit-cloudmail-fields" style="display:none;">
+                        <div class="form-group">
+                            <label for="edit-cm-base-url">API 地址</label>
+                            <input type="text" id="edit-cm-base-url" name="cm_base_url" placeholder="https://mail.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-cm-api-token">API Token</label>
+                            <input type="password" id="edit-cm-api-token" name="cm_api_token" placeholder="留空则不修改">
+                            <small style="color: var(--text-muted);">留空则保持原值不变</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-cm-domain">邮箱域名</label>
+                            <input type="text" id="edit-cm-domain" name="cm_domain" placeholder="example.com">
                         </div>
                     </div>
                     <div class="form-row">

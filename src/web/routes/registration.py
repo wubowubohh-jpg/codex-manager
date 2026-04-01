@@ -75,6 +75,7 @@ EMAIL_SERVICE_LABELS = {
     "custom_domain": "自定义域名",
     "temp_mail": "Temp-Mail 自部署",
     "duck_mail": "DuckMail",
+    "cloud_mail": "CloudMail",
 }
 
 
@@ -295,6 +296,11 @@ def _normalize_email_service_config(
     elif service_type == EmailServiceType.DUCK_MAIL:
         if 'domain' in normalized and 'default_domain' not in normalized:
             normalized['default_domain'] = normalized.pop('domain')
+    elif service_type == EmailServiceType.CLOUD_MAIL:
+        if 'domain' in normalized and 'default_domain' not in normalized:
+            normalized['default_domain'] = normalized.pop('domain')
+        if 'token' in normalized and 'api_token' not in normalized:
+            normalized['api_token'] = normalized.pop('token')
 
     if proxy_url and 'proxy_url' not in normalized:
         normalized['proxy_url'] = proxy_url
@@ -469,6 +475,22 @@ def _run_sync_registration_task(
                         logger.info(f"使用数据库 DuckMail 服务: {db_service.name}")
                     else:
                         raise ValueError("没有可用的 DuckMail 邮箱服务，请先在邮箱服务页面添加服务")
+                elif service_type == EmailServiceType.CLOUD_MAIL:
+                    from ...database.models import EmailService as EmailServiceModel
+
+                    db_service = db.query(EmailServiceModel).filter(
+                        EmailServiceModel.service_type == "cloud_mail",
+                        EmailServiceModel.enabled == True
+                    ).order_by(EmailServiceModel.priority.asc()).first()
+
+                    if db_service and db_service.config:
+                        config = _normalize_email_service_config(service_type, db_service.config, actual_proxy_url)
+                        crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
+                        service_name = db_service.name or EMAIL_SERVICE_LABELS.get(service_type.value, service_type.value)
+                        service_id_for_log = db_service.id
+                        logger.info(f"使用数据库 CloudMail 服务: {db_service.name}")
+                    else:
+                        raise ValueError("没有可用的 CloudMail 邮箱服务，请先在邮箱服务页面添加服务")
                 else:
                     config = email_service_config or {}
                     service_name = EMAIL_SERVICE_LABELS.get(service_type.value, service_type.value)
@@ -1347,6 +1369,9 @@ async def get_available_email_services():
     - generator_email: 临时邮箱（无需配置）
     - outlook: 已导入的 Outlook 账户
     - custom_domain: 已配置的自定义域名服务
+    - temp_mail: 自部署 Temp-Mail 服务
+    - duck_mail: DuckMail 服务
+    - cloud_mail: CloudMail 服务
     """
     from ...database.models import EmailService as EmailServiceModel
     from ...config.settings import get_settings
@@ -1384,6 +1409,11 @@ async def get_available_email_services():
             "services": []
         },
         "duck_mail": {
+            "available": False,
+            "count": 0,
+            "services": []
+        },
+        "cloud_mail": {
             "available": False,
             "count": 0,
             "services": []
@@ -1477,6 +1507,24 @@ async def get_available_email_services():
 
         result["duck_mail"]["count"] = len(duck_mail_services)
         result["duck_mail"]["available"] = len(duck_mail_services) > 0
+
+        cloud_mail_services = db.query(EmailServiceModel).filter(
+            EmailServiceModel.service_type == "cloud_mail",
+            EmailServiceModel.enabled == True
+        ).order_by(EmailServiceModel.priority.asc()).all()
+
+        for service in cloud_mail_services:
+            config = service.config or {}
+            result["cloud_mail"]["services"].append({
+                "id": service.id,
+                "name": service.name,
+                "type": "cloud_mail",
+                "default_domain": config.get("default_domain") or config.get("domain"),
+                "priority": service.priority
+            })
+
+        result["cloud_mail"]["count"] = len(cloud_mail_services)
+        result["cloud_mail"]["available"] = len(cloud_mail_services) > 0
 
     return result
 

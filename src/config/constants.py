@@ -37,6 +37,7 @@ class EmailServiceType(str, Enum):
     CUSTOM_DOMAIN = "custom_domain"
     TEMP_MAIL = "temp_mail"
     DUCK_MAIL = "duck_mail"
+    CLOUD_MAIL = "cloud_mail"
 
 
 # ============================================================================
@@ -129,6 +130,16 @@ EMAIL_SERVICE_DEFAULTS = {
         "password_length": 12,
         "timeout": 30,
         "max_retries": 3,
+    },
+    "cloud_mail": {
+        "base_url": "",
+        "api_token": "",
+        "default_domain": "",
+        "timeout": 30,
+        "max_retries": 3,
+        "poll_interval": 3,
+        "prefix": "oc",
+        "token_bytes": 3,
     }
 }
 

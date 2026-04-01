@@ -23,7 +23,8 @@ let availableServices = {
     outlook: { available: false, services: [] },
     custom_domain: { available: false, services: [] },
     temp_mail: { available: false, services: [] },
-    duck_mail: { available: false, services: [] }
+    duck_mail: { available: false, services: [] },
+    cloud_mail: { available: false, services: [] }
 };
 
 // WebSocket 相关变量
@@ -739,6 +740,18 @@ function updateEmailServiceOptions() {
             const label = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
             return `<label class="msd-item">
                 <input type="checkbox" value="${value}" data-type="duck_mail" data-service-id="${service.id}">
+                <span>${escapeHtml(label)}</span>
+            </label>`;
+        }, '暂无可用服务');
+    }
+
+    // CloudMail
+    if (availableServices.cloud_mail?.available) {
+        addGroup(`☁️ CloudMail (${availableServices.cloud_mail.count} 个服务)`, availableServices.cloud_mail.services, (service) => {
+            const value = `cloud_mail:${service.id}`;
+            const label = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
+            return `<label class="msd-item">
+                <input type="checkbox" value="${value}" data-type="cloud_mail" data-service-id="${service.id}">
                 <span>${escapeHtml(label)}</span>
             </label>`;
         }, '暂无可用服务');

@@ -353,7 +353,9 @@ const statusMap = {
         generator_email: 'Generator.email',
         outlook: 'Outlook',
         custom_domain: '自定义域名',
-        temp_mail: 'Temp-Mail（自部署）'
+        temp_mail: 'Temp-Mail（自部署）',
+        duck_mail: 'DuckMail',
+        cloud_mail: 'CloudMail'
     }
 };
 

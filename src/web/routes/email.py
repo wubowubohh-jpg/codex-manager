@@ -84,7 +84,7 @@ class OutlookBatchImportResponse(BaseModel):
 # ============== Helper Functions ==============
 
 # 敏感字段列表，返回响应时需要过滤
-SENSITIVE_FIELDS = {'password', 'api_key', 'refresh_token', 'access_token'}
+SENSITIVE_FIELDS = {'password', 'api_key', 'api_token', 'refresh_token', 'access_token'}
 
 def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """过滤敏感配置信息"""
@@ -145,6 +145,7 @@ async def get_email_services_stats():
             'custom_count': 0,
             'temp_mail_count': 0,
             'duck_mail_count': 0,
+            'cloud_mail_count': 0,
             'tempmail_available': True,  # 临时邮箱始终可用
             'enabled_count': enabled_count
         }
@@ -158,6 +159,8 @@ async def get_email_services_stats():
                 stats['temp_mail_count'] = count
             elif service_type == 'duck_mail':
                 stats['duck_mail_count'] = count
+            elif service_type == 'cloud_mail':
+                stats['cloud_mail_count'] = count
 
         return stats
 
@@ -218,6 +221,18 @@ async def get_service_types():
                     {"name": "default_domain", "label": "默认域名", "required": True, "placeholder": "duckmail.sbs"},
                     {"name": "api_key", "label": "API Key", "required": False, "secret": True},
                     {"name": "password_length", "label": "随机密码长度", "required": False, "default": 12},
+                ]
+            },
+            {
+                "value": "cloud_mail",
+                "label": "CloudMail",
+                "description": "CloudMail API 邮箱服务，支持 Token 访问",
+                "config_fields": [
+                    {"name": "base_url", "label": "API 地址", "required": True, "placeholder": "https://mail.example.com"},
+                    {"name": "api_token", "label": "API Token", "required": True, "secret": True},
+                    {"name": "domain", "label": "邮箱域名", "required": True, "placeholder": "example.com"},
+                    {"name": "auth_header", "label": "鉴权 Header", "required": False, "default": "Authorization"},
+                    {"name": "auth_prefix", "label": "鉴权前缀", "required": False, "default": ""},
                 ]
             }
         ]

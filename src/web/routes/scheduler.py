@@ -10,6 +10,23 @@ from ...core.pending_oauth import get_oauth_pending_overview, list_oauth_pending
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+SUPPORTED_TOKEN_MODES = {
+    "browser",
+    "browser_http_first",
+    "browser_http_only",
+}
+
+
+def _normalize_scheduler_token_mode(mode: Optional[str]) -> str:
+    value = str(mode or "browser_http_only").strip().lower()
+    if value == "http_independent":
+        return "browser_http_only"
+    if value in SUPPORTED_TOKEN_MODES:
+        return value
+    logger.warning(f"调度器 token_mode={mode} 不受支持，回退 browser_http_only")
+    return "browser_http_only"
+
+
 class CPASchedulerConfig(BaseModel):
     check_enabled: bool
     check_mode: str = "panel"
@@ -24,7 +41,7 @@ class CPASchedulerConfig(BaseModel):
     register_threshold: int
     register_batch_count: int
     email_service: str
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
 
 @router.get("/config")
 async def get_cpa_scheduler_config():
@@ -44,7 +61,7 @@ async def get_cpa_scheduler_config():
         "register_threshold": settings.cpa_auto_register_threshold,
         "register_batch_count": settings.cpa_auto_register_batch_count,
         "email_service": settings.cpa_auto_register_email_service,
-        "token_mode": "browser",
+        "token_mode": _normalize_scheduler_token_mode(settings.cpa_auto_register_token_mode),
     }
 
 @router.get("/logs")
@@ -66,9 +83,7 @@ async def update_cpa_scheduler_config(request: CPASchedulerConfig, background_ta
     """保存CPA自动化配置"""
     if request.check_mode not in ("probe", "panel"):
         raise HTTPException(status_code=400, detail="检测方式必须为 probe 或 panel")
-    token_mode = "browser"
-    if (request.token_mode or "").strip().lower() != "browser":
-        logger.warning(f"调度器 token_mode={request.token_mode} 已废弃，强制使用 browser")
+    token_mode = _normalize_scheduler_token_mode(request.token_mode)
     update_settings(
         cpa_auto_check_enabled=request.check_enabled,
         cpa_auto_check_mode=request.check_mode,

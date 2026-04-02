@@ -134,15 +134,15 @@ SUPPORTED_TOKEN_MODES = {
 
 def _normalize_token_mode(mode: str) -> str:
     """规范化 token 获取方式。"""
-    value = (mode or "browser").strip().lower()
+    value = (mode or "browser_http_only").strip().lower()
     # 兼容旧值：http_independent -> browser_http_only
     if value == "http_independent":
         logger.warning("Token 获取方式 http_independent 已合并为 browser_http_only")
         return "browser_http_only"
     if value in SUPPORTED_TOKEN_MODES:
         return value
-    logger.warning(f"Token 获取方式 {value} 不受支持，回退为 browser")
-    return "browser"
+    logger.warning(f"Token 获取方式 {value} 不受支持，回退为 browser_http_only")
+    return "browser_http_only"
 
 
 def _get_shared_oauth_pre_delay_seconds() -> float:
@@ -181,7 +181,7 @@ class RegistrationTaskCreate(BaseModel):
     """创建注册任务请求"""
     email_service_type: str = "tempmail"
     email_service_pool: List[str] = []
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -198,7 +198,7 @@ class BatchRegistrationRequest(BaseModel):
     count: int = 1
     email_service_type: str = "tempmail"
     email_service_pool: List[str] = []
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -269,7 +269,7 @@ class OutlookBatchRegistrationRequest(BaseModel):
     """Outlook 批量注册请求"""
     service_ids: List[int]
     skip_registered: bool = True
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
     proxy: Optional[str] = None
     interval_min: int = 5
     interval_max: int = 30
@@ -349,7 +349,7 @@ def _run_sync_registration_task(
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int] = None,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     log_prefix: str = "",
     batch_id: str = "",
     auto_upload_cpa: bool = False,
@@ -832,7 +832,7 @@ async def run_registration_task(
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int] = None,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     log_prefix: str = "",
     batch_id: str = "",
     auto_upload_cpa: bool = False,
@@ -922,7 +922,7 @@ async def run_batch_parallel(
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
     concurrency: int,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
@@ -1006,7 +1006,7 @@ async def run_batch_pipeline(
     interval_min: int,
     interval_max: int,
     concurrency: int,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
@@ -1183,7 +1183,7 @@ async def run_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
@@ -1792,7 +1792,7 @@ async def run_outlook_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
     auto_upload_sub2api: bool = False,

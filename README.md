@@ -164,7 +164,7 @@ uv run webui.py --host 0.0.0.0 --port 8080 --access-password mypassword
 > Token 获取方式建议：
 > - **推荐** `BROWSER_OAUTH_HTTP_ONLY=1`（仅 HTTP OAuth）
 > - 需要兜底可用 `BROWSER_OAUTH_HTTP_FIRST=1`（HTTP 优先，失败回退浏览器）
-> - 两项都不设时为 Playwright 全流程
+> - 两项都不设时默认为仅 HTTP OAuth（前端默认也为仅 HTTP）
 
 ### 守护进程模式（源码/单机推荐）
 

@@ -611,10 +611,14 @@ async def trigger_auto_registration(count: int, cpa_service_id: int):
                 proxy=None
             )
 
-    auto_token_mode = "browser"
+    auto_token_mode = "browser_http_only"
     raw_token_mode = (settings.cpa_auto_register_token_mode or "").strip().lower()
-    if raw_token_mode and raw_token_mode != "browser":
-        append_system_log("warning", f"自动注册 Token 获取方式 {raw_token_mode} 已废弃，强制使用 browser")
+    if raw_token_mode in {"browser", "browser_http_first", "browser_http_only"}:
+        auto_token_mode = raw_token_mode
+    elif raw_token_mode == "http_independent":
+        auto_token_mode = "browser_http_only"
+    elif raw_token_mode:
+        append_system_log("warning", f"自动注册 Token 获取方式 {raw_token_mode} 不受支持，回退 browser_http_only")
 
     asyncio.create_task(
         run_batch_registration(

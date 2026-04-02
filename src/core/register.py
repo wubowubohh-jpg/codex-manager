@@ -128,13 +128,13 @@ class RegistrationEngine:
         proxy_url: Optional[str] = None,
         callback_logger: Optional[Callable[[str], None]] = None,
         task_uuid: Optional[str] = None,
-        token_mode: str = "browser",
+        token_mode: str = "browser_http_only",
     ):
         self.email_service = email_service
         self.proxy_url = proxy_url
         self.callback_logger = callback_logger
         self.task_uuid = task_uuid
-        self.token_mode = (token_mode or "browser").strip().lower()
+        self.token_mode = (token_mode or "browser_http_only").strip().lower()
 
         self.email: Optional[str] = None
         self.password: Optional[str] = None
@@ -183,7 +183,7 @@ class RegistrationEngine:
     def run(self) -> RegistrationResult:
         msg = (
             "旧注册引擎已禁用：请使用 BrowserRegistrationEngine。"
-            "（token_mode 仅支持 browser）"
+            "（token_mode 请使用 browser_http_only / browser_http_first / browser）"
         )
         self._log(msg, "error")
         return RegistrationResult(
@@ -194,7 +194,7 @@ class RegistrationEngine:
             error_message=msg,
             logs=list(self.logs),
             metadata={
-                "token_mode": "browser",
+                "token_mode": "browser_http_only",
                 "legacy_engine_removed": True,
                 "registered_at": datetime.now().isoformat(),
             },

@@ -93,8 +93,62 @@ class DuckMailService(BaseEmailService):
         self._accounts_by_email: Dict[str, Dict[str, Any]] = {}
         self._receiver_service = self._build_receiver_service()
 
+    def _infer_inline_receiver_type(
+        self,
+        receiver_type_raw: str,
+        receiver_config: Dict[str, Any],
+    ) -> str:
+        if receiver_type_raw:
+            return receiver_type_raw
+
+        qq_email = str(
+            receiver_config.get("qq_email")
+            or receiver_config.get("email")
+            or receiver_config.get("inbox_email")
+            or self.config.get("receiver_qq_email")
+            or self.config.get("qq_email")
+            or ""
+        ).strip()
+        qq_auth_password = str(
+            receiver_config.get("qq_auth_password")
+            or receiver_config.get("auth_password")
+            or self.config.get("receiver_qq_auth_password")
+            or self.config.get("qq_auth_password")
+            or ""
+        ).strip()
+        if not (qq_email and qq_auth_password):
+            return receiver_type_raw
+
+        receiver_config.setdefault("qq_email", qq_email)
+        receiver_config.setdefault("qq_auth_password", qq_auth_password)
+
+        imap_server = str(
+            receiver_config.get("imap_server")
+            or self.config.get("receiver_qq_imap_server")
+            or self.config.get("imap_server")
+            or ""
+        ).strip()
+        if imap_server:
+            receiver_config.setdefault("imap_server", imap_server)
+
+        imap_port = (
+            receiver_config.get("imap_port")
+            or self.config.get("receiver_qq_imap_port")
+            or self.config.get("imap_port")
+        )
+        if imap_port not in (None, ""):
+            receiver_config.setdefault("imap_port", imap_port)
+
+        return EmailServiceType.QQ_MAIL.value
+
     def _build_receiver_service(self):
         receiver_type_raw = str(self.config.get("receiver_service_type") or "").strip().lower()
+        receiver_config = self.config.get("receiver_service_config") or {}
+        if not isinstance(receiver_config, dict):
+            receiver_config = {}
+        receiver_config = dict(receiver_config)
+
+        receiver_type_raw = self._infer_inline_receiver_type(receiver_type_raw, receiver_config)
         if not receiver_type_raw:
             return None
         try:
@@ -106,15 +160,13 @@ class DuckMailService(BaseEmailService):
             logger.warning("DuckMail 收件后端不能再选择 DuckMail，已忽略")
             return None
 
-        receiver_config = self.config.get("receiver_service_config") or {}
-        if not isinstance(receiver_config, dict):
-            receiver_config = {}
-        receiver_config = dict(receiver_config)
-
         receiver_inbox_email = str(self.config.get("receiver_inbox_email") or "").strip()
         # 对 CloudMail/TempMail 等后端统一注入固定收件箱配置
         if receiver_inbox_email:
-            receiver_config.setdefault("inbox_email", receiver_inbox_email)
+            if receiver_type == EmailServiceType.QQ_MAIL:
+                receiver_config.setdefault("qq_email", receiver_inbox_email)
+            else:
+                receiver_config.setdefault("inbox_email", receiver_inbox_email)
 
         try:
             return EmailServiceFactory.create(

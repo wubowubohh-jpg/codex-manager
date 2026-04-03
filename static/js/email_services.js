@@ -53,6 +53,7 @@ const elements = {
     addTempmailFields: document.getElementById('add-tempmail-fields'),
     addDuckmailFields: document.getElementById('add-duckmail-fields'),
     addDuckduckmailFields: document.getElementById('add-duckduckmail-fields'),
+    addDuckReceiverMode: document.getElementById('custom-dm-receiver-mode'),
     addCloudmailFields: document.getElementById('add-cloudmail-fields'),
     addCloudmailBaseUrl: document.getElementById('custom-cm-base-url'),
     addCloudmailAdminEmail: document.getElementById('custom-cm-admin-email'),
@@ -69,6 +70,7 @@ const elements = {
     editTempmailFields: document.getElementById('edit-tempmail-fields'),
     editDuckmailFields: document.getElementById('edit-duckmail-fields'),
     editDuckduckmailFields: document.getElementById('edit-duckduckmail-fields'),
+    editDuckReceiverMode: document.getElementById('edit-dm-receiver-mode'),
     editCloudmailFields: document.getElementById('edit-cloudmail-fields'),
     editCustomTypeBadge: document.getElementById('edit-custom-type-badge'),
     editCustomSubTypeHidden: document.getElementById('edit-custom-sub-type-hidden'),
@@ -98,6 +100,7 @@ const RECEIVER_SERVICE_TYPE_LABELS = {
     custom_domain: 'MoeMail',
     temp_mail: 'TempMail',
     cloud_mail: 'CloudMail',
+    qq_mail: 'QQ邮箱',
     team_mail: 'TeamMail',
     teammail: 'TeamMail',
 };
@@ -160,6 +163,7 @@ function initEventListeners() {
         elements.addCustomForm.reset();
         loadDuckReceiverServices();
         switchAddSubType('moemail');
+        toggleDuckReceiverMode('add', 'service');
         elements.addCustomModal.classList.add('active');
     });
     elements.closeCustomModal.addEventListener('click', () => elements.addCustomModal.classList.remove('active'));
@@ -171,11 +175,17 @@ function initEventListeners() {
 
     // 类型切换（添加表单）
     elements.customSubType.addEventListener('change', (e) => switchAddSubType(e.target.value));
+    if (elements.addDuckReceiverMode) {
+        elements.addDuckReceiverMode.addEventListener('change', (e) => toggleDuckReceiverMode('add', e.target.value));
+    }
 
     // 编辑自定义域名
     elements.closeEditCustomModal.addEventListener('click', () => elements.editCustomModal.classList.remove('active'));
     elements.cancelEditCustom.addEventListener('click', () => elements.editCustomModal.classList.remove('active'));
     elements.editCustomForm.addEventListener('submit', handleEditCustom);
+    if (elements.editDuckReceiverMode) {
+        elements.editDuckReceiverMode.addEventListener('change', (e) => toggleDuckReceiverMode('edit', e.target.value));
+    }
     if (elements.editCloudmailGenTokenBtn) {
         elements.editCloudmailGenTokenBtn.addEventListener('click', handleEditCloudMailTokenGenerate);
     }
@@ -240,6 +250,104 @@ function getReceiverServiceTypeLabel(serviceType) {
     return RECEIVER_SERVICE_TYPE_LABELS[key] || key || '未知类型';
 }
 
+function toggleDuckReceiverMode(scope, mode) {
+    const normalizedMode = String(mode || 'service').trim().toLowerCase() === 'qq_mail' ? 'qq_mail' : 'service';
+    const prefix = scope === 'edit' ? 'edit' : 'custom';
+    const selectEl = document.getElementById(`${prefix}-dm-receiver-mode`);
+    const serviceFields = document.getElementById(`${scope === 'edit' ? 'edit' : 'add'}-dm-receiver-service-fields`);
+    const qqFields = document.getElementById(`${scope === 'edit' ? 'edit' : 'add'}-dm-receiver-qq-fields`);
+
+    if (selectEl) {
+        selectEl.value = normalizedMode;
+    }
+    if (serviceFields) {
+        serviceFields.style.display = normalizedMode === 'service' ? '' : 'none';
+    }
+    if (qqFields) {
+        qqFields.style.display = normalizedMode === 'qq_mail' ? '' : 'none';
+    }
+}
+
+function getDuckReceiverModeFromConfig(config) {
+    const receiverType = String(config?.receiver_service_type || '').trim().toLowerCase();
+    const receiverConfig = config?.receiver_service_config || {};
+    if (receiverType === 'qq_mail' || receiverConfig?.qq_email || receiverConfig?.qq_auth_password) {
+        return 'qq_mail';
+    }
+    return 'service';
+}
+
+function buildDuckOfficialReceiverConfig(formData, currentConfig = null) {
+    const receiverMode = String(formData.get('dm_receiver_mode') || 'service').trim().toLowerCase();
+    const receiverServiceIdRaw = String(formData.get('dm_receiver_service_id') || '').trim();
+    const receiverInboxEmail = String(formData.get('dm_receiver_inbox_email') || '').trim();
+    const qqEmail = String(formData.get('dm_receiver_qq_email') || '').trim();
+    const qqAuthPassword = String(formData.get('dm_receiver_qq_auth_password') || '').trim();
+    const qqImapServer = String(formData.get('dm_receiver_qq_imap_server') || '').trim();
+    const qqImapPortRaw = String(formData.get('dm_receiver_qq_imap_port') || '').trim();
+    const qqImapPort = qqImapPortRaw ? (parseInt(qqImapPortRaw, 10) || 993) : 993;
+
+    if (receiverMode === 'qq_mail') {
+        const existingReceiverConfig = currentConfig?.receiver_service_type === 'qq_mail'
+            ? (currentConfig?.receiver_service_config || {})
+            : {};
+        const effectiveQqPassword = qqAuthPassword || existingReceiverConfig.qq_auth_password || '';
+
+        if (!qqEmail) {
+            throw new Error('请填写 QQ 邮箱地址');
+        }
+        if (!effectiveQqPassword) {
+            throw new Error('请填写 QQ 邮箱授权码');
+        }
+
+        return {
+            receiver_service_id: null,
+            receiver_service_type: 'qq_mail',
+            receiver_service_name: 'QQ邮箱',
+            receiver_inbox_email: qqEmail || null,
+            receiver_service_config: {
+                qq_email: qqEmail || null,
+                qq_auth_password: effectiveQqPassword,
+                imap_server: qqImapServer || existingReceiverConfig.imap_server || 'imap.qq.com',
+                imap_port: qqImapPort || existingReceiverConfig.imap_port || 993
+            }
+        };
+    }
+
+    let receiverServiceId = null;
+    if (receiverServiceIdRaw) {
+        const parsed = parseInt(receiverServiceIdRaw, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            receiverServiceId = parsed;
+        }
+    }
+
+    return {
+        receiver_service_id: receiverServiceId,
+        receiver_service_type: null,
+        receiver_service_name: null,
+        receiver_service_config: null,
+        receiver_inbox_email: receiverInboxEmail || null
+    };
+}
+
+function getDuckReceiverSummary(config) {
+    if (!config || typeof config !== 'object') {
+        return '';
+    }
+
+    const receiverType = String(config.receiver_service_type || '').trim().toLowerCase();
+    if (receiverType === 'qq_mail') {
+        const qqEmail = String(config?.receiver_service_config?.qq_email || config.receiver_inbox_email || '').trim();
+        return qqEmail ? `QQ邮箱 (${qqEmail})` : 'QQ邮箱';
+    }
+    if (config.receiver_service_id) {
+        const label = String(config.receiver_service_name || getReceiverServiceTypeLabel(receiverType)).trim();
+        return label ? `${label} (ID ${config.receiver_service_id})` : `ID ${config.receiver_service_id}`;
+    }
+    return '';
+}
+
 function renderDuckReceiverServiceOptions() {
     const selectIds = ['custom-dm-receiver-service-id', 'edit-dm-receiver-service-id'];
     const options = [...(duckReceiverServices || [])]
@@ -252,6 +360,11 @@ function renderDuckReceiverServiceOptions() {
 
         const currentValue = String(selectEl.value || '').trim();
         selectEl.innerHTML = '';
+
+        const placeholderOption = document.createElement('option');
+        placeholderOption.value = '';
+        placeholderOption.textContent = '请选择已配置服务';
+        selectEl.appendChild(placeholderOption);
 
         options.forEach((service) => {
             const option = document.createElement('option');
@@ -269,9 +382,8 @@ function renderDuckReceiverServiceOptions() {
                 selectEl.appendChild(currentOption);
             }
             selectEl.value = currentValue;
-        } else if (options.length > 0) {
-            // 保持“可选”语义：未配置时不自动选择第一项，避免误提交 receiver_service_id
-            selectEl.selectedIndex = -1;
+        } else {
+            selectEl.value = '';
         }
     });
 }
@@ -300,6 +412,9 @@ function switchAddSubType(subType) {
     elements.addDuckmailFields.style.display = subType === 'duckmail' ? '' : 'none';
     if (elements.addDuckduckmailFields) {
         elements.addDuckduckmailFields.style.display = subType === 'duckduckmail' ? '' : 'none';
+        if (subType === 'duckduckmail') {
+            toggleDuckReceiverMode('add', elements.addDuckReceiverMode?.value || 'service');
+        }
     }
     elements.addCloudmailFields.style.display = subType === 'cloudmail' ? '' : 'none';
 }
@@ -312,6 +427,9 @@ function switchEditSubType(subType) {
     elements.editDuckmailFields.style.display = subType === 'duckmail' ? '' : 'none';
     if (elements.editDuckduckmailFields) {
         elements.editDuckduckmailFields.style.display = subType === 'duckduckmail' ? '' : 'none';
+        if (subType === 'duckduckmail') {
+            toggleDuckReceiverMode('edit', elements.editDuckReceiverMode?.value || 'service');
+        }
     }
     elements.editCloudmailFields.style.display = subType === 'cloudmail' ? '' : 'none';
     elements.editCustomTypeBadge.textContent = CUSTOM_SUBTYPE_LABELS[subType] || CUSTOM_SUBTYPE_LABELS.moemail;
@@ -521,8 +639,13 @@ function getCustomServiceAddress(service) {
         ? (service.config?.duck_api_base_url || '-')
         : (service.config?.base_url || '-');
     const domains = parseDomainList(service.config?.default_domain || service.config?.domain);
+    const receiverSummary = getDuckReceiverSummary(service.config);
     if (!domains.length) {
-        return escapeHtml(baseUrl);
+        if (!receiverSummary) {
+            return escapeHtml(baseUrl);
+        }
+        return `${escapeHtml(baseUrl)}
+        <div style="color: var(--text-muted); margin-top: 4px;">收件后端：${escapeHtml(receiverSummary)}</div>`;
     }
 
     const strategy = normalizeDomainStrategy(service.config?.domain_strategy);
@@ -533,7 +656,8 @@ function getCustomServiceAddress(service) {
 
     return `${escapeHtml(baseUrl)}
         <div style="color: var(--text-muted); margin-top: 4px;">域名：${escapeHtml(displayDomains)}</div>
-        <div style="color: var(--text-muted); margin-top: 2px;">策略：${strategyLabel}</div>`;
+        <div style="color: var(--text-muted); margin-top: 2px;">策略：${strategyLabel}</div>
+        ${receiverSummary ? `<div style="color: var(--text-muted); margin-top: 2px;">收件后端：${escapeHtml(receiverSummary)}</div>` : ''}`;
 }
 
 // 加载自定义邮箱服务（custom_domain + temp_mail + duck_mail 合并）
@@ -700,19 +824,17 @@ async function handleAddCustom(e) {
     } else {
         serviceType = 'duck_mail';
         if (subType === 'duckduckmail') {
-            const receiverServiceIdRaw = String(formData.get('dm_receiver_service_id') || '').trim();
-            config = {
-                mode: 'duck_official',
-                duck_api_base_url: formData.get('ddm_official_base_url') || 'https://quack.duckduckgo.com',
-                duck_api_token: formData.get('ddm_api_token'),
-                duck_cookie: formData.get('ddm_cookie'),
-                receiver_inbox_email: formData.get('dm_receiver_inbox_email')
-            };
-            if (receiverServiceIdRaw) {
-                const parsed = parseInt(receiverServiceIdRaw, 10);
-                if (Number.isFinite(parsed) && parsed > 0) {
-                    config.receiver_service_id = parsed;
-                }
+            try {
+                config = {
+                    mode: 'duck_official',
+                    duck_api_base_url: formData.get('ddm_official_base_url') || 'https://quack.duckduckgo.com',
+                    duck_api_token: formData.get('ddm_api_token'),
+                    duck_cookie: formData.get('ddm_cookie'),
+                    ...buildDuckOfficialReceiverConfig(formData)
+                };
+            } catch (error) {
+                toast.error(error.message || 'DuckDuckMail 收件后端配置不完整');
+                return;
             }
         } else {
             config = {
@@ -920,8 +1042,16 @@ async function editCustomService(id, subType) {
             document.getElementById('edit-ddm-api-token').placeholder = service.config?.duck_api_token ? '已设置，留空保持不变' : '请输入 Duck API Token（可选）';
             document.getElementById('edit-ddm-cookie').value = '';
             document.getElementById('edit-ddm-cookie').placeholder = service.config?.duck_cookie ? '已设置，留空保持不变' : '粘贴 Duck Cookie（可选）';
+            const receiverMode = getDuckReceiverModeFromConfig(service.config);
+            document.getElementById('edit-dm-receiver-mode').value = receiverMode;
             document.getElementById('edit-dm-receiver-service-id').value = service.config?.receiver_service_id || '';
             document.getElementById('edit-dm-receiver-inbox-email').value = service.config?.receiver_inbox_email || '';
+            document.getElementById('edit-dm-receiver-qq-email').value = service.config?.receiver_service_config?.qq_email || '';
+            document.getElementById('edit-dm-receiver-qq-auth-password').value = '';
+            document.getElementById('edit-dm-receiver-qq-auth-password').placeholder = service.config?.receiver_service_config?.qq_auth_password ? '已设置，留空保持不变' : '请输入 QQ 邮箱授权码';
+            document.getElementById('edit-dm-receiver-qq-imap-server').value = service.config?.receiver_service_config?.imap_server || 'imap.qq.com';
+            document.getElementById('edit-dm-receiver-qq-imap-port').value = service.config?.receiver_service_config?.imap_port || 993;
+            toggleDuckReceiverMode('edit', receiverMode);
         }
 
         elements.editCustomModal.classList.add('active');
@@ -936,6 +1066,16 @@ async function handleEditCustom(e) {
     const id = document.getElementById('edit-custom-id').value;
     const formData = new FormData(e.target);
     const subType = formData.get('sub_type');
+    let currentService = null;
+
+    if (subType === 'duckduckmail') {
+        try {
+            currentService = await api.get(`/email-services/${id}/full`);
+        } catch (error) {
+            toast.error('获取当前 DuckDuckMail 配置失败: ' + error.message);
+            return;
+        }
+    }
 
     let config;
     if (subType === 'moemail') {
@@ -977,22 +1117,20 @@ async function handleEditCustom(e) {
         const apiKey = formData.get('dm_api_key');
         if (apiKey && apiKey.trim()) config.api_key = apiKey.trim();
     } else if (subType === 'duckduckmail') {
-        const receiverServiceIdRaw = String(formData.get('dm_receiver_service_id') || '').trim();
-        config = {
-            mode: 'duck_official',
-            duck_api_base_url: formData.get('ddm_official_base_url') || 'https://quack.duckduckgo.com',
-            receiver_inbox_email: formData.get('dm_receiver_inbox_email')
-        };
+        try {
+            config = {
+                mode: 'duck_official',
+                duck_api_base_url: formData.get('ddm_official_base_url') || 'https://quack.duckduckgo.com',
+                ...buildDuckOfficialReceiverConfig(formData, currentService?.config || null)
+            };
+        } catch (error) {
+            toast.error(error.message || 'DuckDuckMail 收件后端配置不完整');
+            return;
+        }
         const duckApiToken = formData.get('ddm_api_token');
         if (duckApiToken && duckApiToken.trim()) config.duck_api_token = duckApiToken.trim();
         const duckCookie = formData.get('ddm_cookie');
         if (duckCookie && duckCookie.trim()) config.duck_cookie = duckCookie.trim();
-        if (receiverServiceIdRaw) {
-            const parsed = parseInt(receiverServiceIdRaw, 10);
-            if (Number.isFinite(parsed) && parsed > 0) {
-                config.receiver_service_id = parsed;
-            }
-        }
     } else {
         toast.error('不支持的服务子类型');
         return;

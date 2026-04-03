@@ -141,3 +141,43 @@ def test_get_verification_code_reads_message_detail_and_extracts_code():
     assert detail_call["method"] == "GET"
     assert detail_call["url"] == "https://api.duckmail.test/messages/msg-1"
     assert detail_call["kwargs"]["headers"]["Authorization"] == "Bearer token-123"
+
+
+def test_duck_official_builds_inline_qq_receiver_service():
+    service = DuckMailService({
+        "mode": "duck_official",
+        "duck_api_token": "duck-token",
+        "receiver_service_type": "qq_mail",
+        "receiver_service_config": {
+            "qq_email": "receiver@qq.com",
+            "qq_auth_password": "qq-auth-code",
+            "imap_server": "imap.qq.com",
+            "imap_port": 993,
+        },
+    })
+
+    receiver_service = service._receiver_service
+
+    assert receiver_service is not None
+    assert receiver_service.service_type.value == "qq_mail"
+    assert receiver_service.config["qq_email"] == "receiver@qq.com"
+    assert receiver_service.config["qq_auth_password"] == "qq-auth-code"
+
+
+def test_duck_official_infers_inline_qq_receiver_from_config():
+    service = DuckMailService({
+        "mode": "duck_official",
+        "duck_api_token": "duck-token",
+        "receiver_service_config": {
+            "qq_email": "inline@qq.com",
+            "qq_auth_password": "inline-auth",
+        },
+        "receiver_inbox_email": "override@qq.com",
+    })
+
+    receiver_service = service._receiver_service
+
+    assert receiver_service is not None
+    assert receiver_service.service_type.value == "qq_mail"
+    assert receiver_service.config["qq_email"] == "inline@qq.com"
+    assert receiver_service.config["qq_auth_password"] == "inline-auth"

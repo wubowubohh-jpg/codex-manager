@@ -39,6 +39,7 @@ class EmailServiceType(str, Enum):
     TEMP_MAIL = "temp_mail"
     DUCK_MAIL = "duck_mail"
     CLOUD_MAIL = "cloud_mail"
+    QQ_MAIL = "qq_mail"
 
 
 # ============================================================================
@@ -153,6 +154,15 @@ EMAIL_SERVICE_DEFAULTS = {
         "poll_interval": 3,
         "prefix": "oc",
         "token_bytes": 3,
+    },
+    "qq_mail": {
+        "qq_email": "",
+        "qq_auth_password": "",
+        "imap_server": "imap.qq.com",
+        "imap_port": 993,
+        "use_ssl": True,
+        "timeout": 120,
+        "poll_interval": 5,
     }
 }
 

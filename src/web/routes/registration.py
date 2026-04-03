@@ -79,6 +79,7 @@ EMAIL_SERVICE_LABELS = {
     "temp_mail": "Temp-Mail 自部署",
     "duck_mail": "DuckMail",
     "cloud_mail": "CloudMail",
+    "qq_mail": "QQ邮箱",
 }
 
 
@@ -354,6 +355,19 @@ def _normalize_email_service_config(
             normalized['api_token'] = normalized.pop('token')
         strategy = str(normalized.get('domain_strategy') or '').strip().lower()
         normalized['domain_strategy'] = strategy if strategy in ('round_robin', 'random') else 'round_robin'
+    elif service_type == EmailServiceType.QQ_MAIL:
+        if 'email' in normalized and 'qq_email' not in normalized:
+            normalized['qq_email'] = normalized.pop('email')
+        if 'inbox_email' in normalized and 'qq_email' not in normalized:
+            normalized['qq_email'] = normalized.pop('inbox_email')
+        if 'password' in normalized and 'qq_auth_password' not in normalized:
+            normalized['qq_auth_password'] = normalized.pop('password')
+        if 'auth_password' in normalized and 'qq_auth_password' not in normalized:
+            normalized['qq_auth_password'] = normalized.pop('auth_password')
+        if 'server' in normalized and 'imap_server' not in normalized:
+            normalized['imap_server'] = normalized.pop('server')
+        if 'port' in normalized and 'imap_port' not in normalized:
+            normalized['imap_port'] = normalized.pop('port')
 
     if proxy_url and 'proxy_url' not in normalized:
         normalized['proxy_url'] = proxy_url

@@ -102,6 +102,7 @@ SENSITIVE_FIELDS = {
     'admin_password',
     'api_key',
     'api_token',
+    'qq_auth_password',
     'refresh_token',
     'access_token',
     'duck_cookie',
@@ -110,7 +111,7 @@ SENSITIVE_FIELDS = {
 
 def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """过滤敏感配置信息"""
-    if not config:
+    if not isinstance(config, dict) or not config:
         return {}
 
     filtered = {}
@@ -118,6 +119,13 @@ def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if key in SENSITIVE_FIELDS:
             # 敏感字段不返回，但标记是否存在
             filtered[f"has_{key}"] = bool(value)
+        elif isinstance(value, dict):
+            filtered[key] = filter_sensitive_config(value)
+        elif isinstance(value, list):
+            filtered[key] = [
+                filter_sensitive_config(item) if isinstance(item, dict) else item
+                for item in value
+            ]
         else:
             filtered[key] = value
 
@@ -320,7 +328,7 @@ async def get_service_types():
             },
             {
                 "value": "duck_mail",
-                "label": "Duck 邮箱",
+                "label": "DuckMail",
                 "description": "DuckMail.sbs 与 DuckDuckMail 子类型邮箱服务",
                 "config_fields": [
                     {"name": "base_url", "label": "API 地址", "required": True, "placeholder": "https://quack.duckduckgo.com"},
@@ -343,6 +351,17 @@ async def get_service_types():
                     {"name": "domain_strategy", "label": "域名选择策略", "required": False, "default": "round_robin"},
                     {"name": "auth_header", "label": "鉴权 Header", "required": False, "default": "Authorization"},
                     {"name": "auth_prefix", "label": "鉴权前缀", "required": False, "default": ""},
+                ]
+            },
+            {
+                "value": "qq_mail",
+                "label": "QQ邮箱",
+                "description": "基于 IMAP 轮询 QQ 邮箱验证码，可作为 DuckDuckMail 的收件后端",
+                "config_fields": [
+                    {"name": "qq_email", "label": "QQ 邮箱地址", "required": True, "placeholder": "example@qq.com"},
+                    {"name": "qq_auth_password", "label": "QQ 邮箱授权码", "required": True, "secret": True},
+                    {"name": "imap_server", "label": "IMAP 服务器", "required": False, "default": "imap.qq.com"},
+                    {"name": "imap_port", "label": "IMAP 端口", "required": False, "default": 993},
                 ]
             }
         ]

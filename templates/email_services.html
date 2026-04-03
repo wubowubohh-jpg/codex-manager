@@ -304,14 +304,44 @@
                             <textarea id="custom-ddm-cookie" name="ddm_cookie" rows="3" placeholder="粘贴完整 Cookie"></textarea>
                         </div>
                         <div class="form-group">
-                            <label for="custom-dm-receiver-service-id">收件后端服务（可选）</label>
-                            <select id="custom-dm-receiver-service-id" name="dm_receiver_service_id"></select>
-                            <small style="color: var(--text-muted);">仅显示其他已启用收件后端服务（支持 Outlook/MoeMail/TempMail/CloudMail 等）</small>
+                            <label for="custom-dm-receiver-mode">收件后端类型</label>
+                            <select id="custom-dm-receiver-mode" name="dm_receiver_mode">
+                                <option value="service">使用已配置服务</option>
+                                <option value="qq_mail">内联 QQ 邮箱 IMAP</option>
+                            </select>
                         </div>
-                        <div class="form-group">
-                            <label for="custom-dm-receiver-inbox-email">固定收件邮箱（可选）</label>
-                            <input type="text" id="custom-dm-receiver-inbox-email" name="dm_receiver_inbox_email" placeholder="例如：abc@qq.com">
-                            <small style="color: var(--text-muted);">若填写，收件后端将固定轮询这个邮箱，并按 Duck 别名过滤收件人</small>
+                        <div id="add-dm-receiver-service-fields">
+                            <div class="form-group">
+                                <label for="custom-dm-receiver-service-id">收件后端服务（可选）</label>
+                                <select id="custom-dm-receiver-service-id" name="dm_receiver_service_id"></select>
+                                <small style="color: var(--text-muted);">仅显示其他已启用收件后端服务（支持 Outlook/MoeMail/TempMail/CloudMail/QQ邮箱 等）</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-dm-receiver-inbox-email">固定收件邮箱（可选）</label>
+                                <input type="text" id="custom-dm-receiver-inbox-email" name="dm_receiver_inbox_email" placeholder="例如：abc@qq.com">
+                                <small style="color: var(--text-muted);">若填写，收件后端将固定轮询这个邮箱，并按 Duck 别名过滤收件人</small>
+                            </div>
+                        </div>
+                        <div id="add-dm-receiver-qq-fields" style="display:none;">
+                            <div class="form-group">
+                                <label for="custom-dm-receiver-qq-email">QQ 邮箱地址</label>
+                                <input type="text" id="custom-dm-receiver-qq-email" name="dm_receiver_qq_email" placeholder="example@qq.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="custom-dm-receiver-qq-auth-password">QQ 邮箱授权码</label>
+                                <input type="password" id="custom-dm-receiver-qq-auth-password" name="dm_receiver_qq_auth_password" placeholder="POP3/IMAP 授权码">
+                                <small style="color: var(--text-muted);">不是 QQ 登录密码，请使用邮箱设置中的 IMAP 授权码</small>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="custom-dm-receiver-qq-imap-server">IMAP 服务器</label>
+                                    <input type="text" id="custom-dm-receiver-qq-imap-server" name="dm_receiver_qq_imap_server" value="imap.qq.com" placeholder="imap.qq.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="custom-dm-receiver-qq-imap-port">IMAP 端口</label>
+                                    <input type="number" id="custom-dm-receiver-qq-imap-port" name="dm_receiver_qq_imap_port" value="993" min="1">
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <!-- CloudMail 字段 -->
@@ -484,14 +514,44 @@
                             <small style="color: var(--text-muted);">留空则保持原值不变</small>
                         </div>
                         <div class="form-group">
-                            <label for="edit-dm-receiver-service-id">收件后端服务（可选）</label>
-                            <select id="edit-dm-receiver-service-id" name="dm_receiver_service_id"></select>
-                            <small style="color: var(--text-muted);">仅显示其他已启用收件后端服务（支持 Outlook/MoeMail/TempMail/CloudMail 等）</small>
+                            <label for="edit-dm-receiver-mode">收件后端类型</label>
+                            <select id="edit-dm-receiver-mode" name="dm_receiver_mode">
+                                <option value="service">使用已配置服务</option>
+                                <option value="qq_mail">内联 QQ 邮箱 IMAP</option>
+                            </select>
                         </div>
-                        <div class="form-group">
-                            <label for="edit-dm-receiver-inbox-email">固定收件邮箱（可选）</label>
-                            <input type="text" id="edit-dm-receiver-inbox-email" name="dm_receiver_inbox_email" placeholder="例如：abc@qq.com">
-                            <small style="color: var(--text-muted);">填写后将固定拉取该邮箱并按 Duck 别名过滤</small>
+                        <div id="edit-dm-receiver-service-fields">
+                            <div class="form-group">
+                                <label for="edit-dm-receiver-service-id">收件后端服务（可选）</label>
+                                <select id="edit-dm-receiver-service-id" name="dm_receiver_service_id"></select>
+                                <small style="color: var(--text-muted);">仅显示其他已启用收件后端服务（支持 Outlook/MoeMail/TempMail/CloudMail/QQ邮箱 等）</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-dm-receiver-inbox-email">固定收件邮箱（可选）</label>
+                                <input type="text" id="edit-dm-receiver-inbox-email" name="dm_receiver_inbox_email" placeholder="例如：abc@qq.com">
+                                <small style="color: var(--text-muted);">填写后将固定拉取该邮箱并按 Duck 别名过滤</small>
+                            </div>
+                        </div>
+                        <div id="edit-dm-receiver-qq-fields" style="display:none;">
+                            <div class="form-group">
+                                <label for="edit-dm-receiver-qq-email">QQ 邮箱地址</label>
+                                <input type="text" id="edit-dm-receiver-qq-email" name="dm_receiver_qq_email" placeholder="example@qq.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-dm-receiver-qq-auth-password">QQ 邮箱授权码</label>
+                                <input type="password" id="edit-dm-receiver-qq-auth-password" name="dm_receiver_qq_auth_password" placeholder="留空则不修改">
+                                <small style="color: var(--text-muted);">留空则保持原值不变</small>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="edit-dm-receiver-qq-imap-server">IMAP 服务器</label>
+                                    <input type="text" id="edit-dm-receiver-qq-imap-server" name="dm_receiver_qq_imap_server" value="imap.qq.com" placeholder="imap.qq.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="edit-dm-receiver-qq-imap-port">IMAP 端口</label>
+                                    <input type="number" id="edit-dm-receiver-qq-imap-port" name="dm_receiver_qq_imap_port" value="993" min="1">
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <!-- CloudMail 字段 -->

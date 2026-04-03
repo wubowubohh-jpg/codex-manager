@@ -46,6 +46,32 @@ def test_filter_sensitive_config_marks_duckmail_api_key():
     assert "api_key" not in filtered
 
 
+def test_filter_sensitive_config_masks_nested_inline_qq_receiver_secret():
+    filtered = email_routes.filter_sensitive_config({
+        "mode": "duck_official",
+        "receiver_service_type": "qq_mail",
+        "receiver_service_config": {
+            "qq_email": "receiver@qq.com",
+            "qq_auth_password": "qq-auth-code",
+            "imap_server": "imap.qq.com",
+        },
+    })
+
+    assert filtered["receiver_service_config"]["qq_email"] == "receiver@qq.com"
+    assert filtered["receiver_service_config"]["has_qq_auth_password"] is True
+    assert "qq_auth_password" not in filtered["receiver_service_config"]
+
+
+def test_email_service_types_include_qq_mail():
+    result = asyncio.run(email_routes.get_service_types())
+    qq_type = next(item for item in result["types"] if item["value"] == "qq_mail")
+
+    assert qq_type["label"] == "QQ邮箱"
+    field_names = [field["name"] for field in qq_type["config_fields"]]
+    assert "qq_email" in field_names
+    assert "qq_auth_password" in field_names
+
+
 def test_registration_available_services_include_duck_mail(monkeypatch):
     runtime_dir = Path("tests_runtime")
     runtime_dir.mkdir(exist_ok=True)

@@ -364,6 +364,75 @@ body {
     accent-color: var(--primary-color);
 }
 
+.scheduler-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.scheduler-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    flex-wrap: wrap;
+}
+
+.cpa-policy-rule {
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.cpa-policy-rule-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    margin-bottom: 8px;
+}
+
+.cpa-policy-rule-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.cpa-policy-rule .form-group {
+    margin-bottom: 0;
+}
+
+.cpa-policy-rule-plan-list {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.cpa-policy-rule-plan-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.cpa-policy-rule-fallback {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+    .cpa-policy-rule-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ============================================
    按钮
    ============================================ */

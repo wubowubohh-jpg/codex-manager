@@ -19,7 +19,7 @@ let batchFinalStatus = null;  // 保存批量任务的最终状态
 let displayedLogs = new Set();  // 用于日志去重
 let toastShown = false;  // 标记是否已显示过 toast
 let availableServices = {
-    tempmail: { available: true, services: [] },
+    tempmail: { available: false, services: [] },
     outlook: { available: false, services: [] },
     custom_domain: { available: false, services: [] },
     temp_mail: { available: false, services: [] },
@@ -69,6 +69,10 @@ const elements = {
     // 已注册账号
     recentAccountsTable: document.getElementById('recent-accounts-table'),
     refreshAccountsBtn: document.getElementById('refresh-accounts-btn'),
+    unauthorizedAccountsTable: document.getElementById('unauthorized-accounts-table'),
+    unauthorizedCount: document.getElementById('unauthorized-count'),
+    refreshUnauthorizedBtn: document.getElementById('refresh-unauthorized-btn'),
+    clearUnauthorizedBtn: document.getElementById('clear-unauthorized-btn'),
     // Outlook 批量注册
     outlookBatchSection: document.getElementById('outlook-batch-section'),
     outlookAccountsContainer: document.getElementById('outlook-accounts-container'),
@@ -98,20 +102,18 @@ const elements = {
     tmServiceSelect: document.getElementById('tm-service-select'),
     // 定时 CPA
     cpaAutoCheckEnabled: document.getElementById('cpa-auto-check-enabled'),
+    cpaMasterToggleWrap: document.getElementById('cpa-master-toggle-wrap'),
+    cpaCheckMasterStatus: document.getElementById('cpa-check-master-status'),
     cpaCheckMode: document.getElementById('cpa-check-mode'),
-    cpaAutoRemove401: document.getElementById('cpa-auto-remove-401'),
-    cpaCheck401Interval: document.getElementById('cpa-check-401-interval'),
-    cpaTestUrl: document.getElementById('cpa-test-url'),
-    cpaTestModel: document.getElementById('cpa-test-model'),
     cpaCheckInterval: document.getElementById('cpa-check-interval'),
-    cpaCheckSleep: document.getElementById('cpa-check-sleep'),
     cpaCheckMinRemainingWeeklyPercent: document.getElementById('cpa-check-min-remaining-weekly-percent'),
+    cpaPolicyRulesContainer: document.getElementById('cpa-policy-rules-container'),
+    cpaAddPolicyRuleBtn: document.getElementById('cpa-add-policy-rule-btn'),
     cpaAutoRegisterEnabled: document.getElementById('cpa-auto-register-enabled'),
     cpaRegisterThreshold: document.getElementById('cpa-register-threshold'),
     cpaRegisterBatchCount: document.getElementById('cpa-register-batch-count'),
     cpaSaveConfigBtn: document.getElementById('cpa-save-config-btn'),
     cpaStopTaskBtn: document.getElementById('cpa-stop-task-btn'),
-    cpaForceRemove401Btn: document.getElementById('cpa-force-remove-401-btn'),
     cpaForceCheckBtn: document.getElementById('cpa-force-check-btn'),
 };
 
@@ -119,6 +121,39 @@ const elements = {
 const REG_FORM_STATE_KEY = 'registration_form_state_v1';
 let registrationFormState = null;
 let suppressFormStateSave = false;
+let cpaPolicyRulesState = [];
+
+const CPA_RULE_PLAN_OPTIONS = ['free', 'plus', 'team', 'pro', 'unknown'];
+const CPA_RULE_TASK_OPTIONS = [
+    { value: 'invalid', label: '失效检查任务' },
+    { value: 'quota', label: '限额检查任务' },
+];
+const CPA_RULE_CONDITION_OPTIONS = [
+    { value: 'invalid_signal', label: '失效信号（401/429/无额度等）' },
+    { value: 'weekly_remaining_percent', label: '周限额剩余百分比' },
+    { value: 'five_hour_remaining_percent', label: '5小时限额剩余百分比' },
+];
+const CPA_RULE_OPERATOR_OPTIONS = [
+    { value: 'lt', label: '小于' },
+    { value: 'lte', label: '小于等于' },
+    { value: 'gt', label: '大于' },
+    { value: 'gte', label: '大于等于' },
+    { value: 'eq', label: '等于' },
+    { value: 'neq', label: '不等于' },
+];
+const CPA_RULE_ACTION_OPTIONS = [
+    { value: 'remove', label: '剔除凭证' },
+    { value: 'disable', label: '禁用凭证' },
+    { value: 'enable', label: '启用凭证' },
+];
+const CPA_RULE_TARGET_STATUS_OPTIONS = [
+    { value: 'all', label: '全部状态' },
+    { value: 'enabled', label: '仅启用状态' },
+    { value: 'disabled', label: '仅关闭状态' },
+];
+const CPA_CHECK_FIXED_SLEEP_SECONDS = 0;
+const CPA_CHECK_FIXED_TEST_URL = '';
+const CPA_CHECK_FIXED_TEST_MODEL = '';
 
 function loadRegistrationFormState() {
     try {
@@ -139,7 +174,7 @@ function buildRegistrationFormState() {
     return {
         email_service_values: getSelectedEmailServiceValues(),
         reg_mode: elements.regMode ? elements.regMode.value : 'single',
-        token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser',
+        token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser_http_only',
         batch_count: elements.batchCount ? elements.batchCount.value : '',
         concurrency_mode: elements.concurrencyMode ? elements.concurrencyMode.value : 'pipeline',
         concurrency_count: elements.concurrencyCount ? elements.concurrencyCount.value : '',
@@ -190,7 +225,7 @@ function applyRegistrationFormStateBase() {
                 savedTokenMode = 'browser_http_only';
             }
             const optionValues = Array.from(elements.tokenMode.options || []).map(opt => opt.value);
-            elements.tokenMode.value = optionValues.includes(savedTokenMode) ? savedTokenMode : 'browser';
+            elements.tokenMode.value = optionValues.includes(savedTokenMode) ? savedTokenMode : 'browser_http_only';
         }
         if (elements.batchCount && registrationFormState.batch_count !== undefined) {
             elements.batchCount.value = registrationFormState.batch_count;
@@ -328,26 +363,282 @@ async function loadSchedulerConfig() {
     try {
         const config = await api.get('/scheduler/config');
         if (elements.cpaAutoCheckEnabled) elements.cpaAutoCheckEnabled.checked = config.check_enabled;
+        updateCpaCheckMasterToggleUI();
         if (elements.cpaCheckMode) elements.cpaCheckMode.value = config.check_mode || 'panel';
-        if (elements.cpaAutoRemove401) elements.cpaAutoRemove401.checked = !!config.check_remove_401;
-        if (elements.cpaCheck401Interval) elements.cpaCheck401Interval.value = config.check_remove_401_interval ?? 3;
-        if (elements.cpaTestUrl) elements.cpaTestUrl.value = config.test_url || '';
-        if (elements.cpaTestModel) elements.cpaTestModel.value = config.test_model || '';
         if (elements.cpaCheckInterval) elements.cpaCheckInterval.value = config.check_interval;
-        if (elements.cpaCheckSleep) elements.cpaCheckSleep.value = config.check_sleep;
         if (elements.cpaCheckMinRemainingWeeklyPercent) {
             elements.cpaCheckMinRemainingWeeklyPercent.value =
                 config.check_min_remaining_weekly_percent ?? 20;
         }
         if (elements.cpaAutoRegisterEnabled) elements.cpaAutoRegisterEnabled.checked = config.register_enabled;
-
-        // 更新徽标状态
-        updateCpaSchedulerBadge(config.check_enabled);
         if (elements.cpaRegisterThreshold) elements.cpaRegisterThreshold.value = config.register_threshold;
         if (elements.cpaRegisterBatchCount) elements.cpaRegisterBatchCount.value = config.register_batch_count;
+
+        const minWeeklyPercent = parseFloat(config.check_min_remaining_weekly_percent ?? 20) || 20;
+        const policyRules = Array.isArray(config.policy_rules) && config.policy_rules.length > 0
+            ? config.policy_rules
+            : buildDefaultCpaPolicyRules(minWeeklyPercent);
+        cpaPolicyRulesState = policyRules.map((rule, idx) => normalizeCpaPolicyRule(rule, idx));
+        renderCpaPolicyRules();
+
+        // 更新徽标状态
+        updateCpaSchedulerBadge(!!(config.check_enabled || config.register_enabled));
     } catch (e) {
         console.error('加载调度配置失败', e);
     }
+}
+
+function normalizeCpaPolicyRule(rule, index) {
+    const source = rule && typeof rule === 'object' ? rule : {};
+    const normalizedPlans = Array.isArray(source.plan_types || source.plans)
+        ? (source.plan_types || source.plans)
+            .map(v => String(v || '').trim().toLowerCase())
+            .filter(v => v && (CPA_RULE_PLAN_OPTIONS.includes(v) || v === 'all'))
+        : [];
+    return {
+        id: String(source.id || `rule_${index + 1}`),
+        name: String(source.name || '').trim(),
+        enabled: source.enabled !== false,
+        task: ['invalid', 'quota'].includes(String(source.task || '').toLowerCase())
+            ? String(source.task).toLowerCase()
+            : 'invalid',
+        condition: ['invalid_signal', 'weekly_remaining_percent', 'five_hour_remaining_percent'].includes(String(source.condition || '').toLowerCase())
+            ? String(source.condition).toLowerCase()
+            : 'invalid_signal',
+        operator: ['lt', 'lte', 'gt', 'gte', 'eq', 'neq'].includes(String(source.operator || '').toLowerCase())
+            ? String(source.operator).toLowerCase()
+            : 'lt',
+        threshold: Number.isFinite(parseFloat(source.threshold)) ? parseFloat(source.threshold) : 0,
+        target_status: ['all', 'enabled', 'disabled'].includes(String(source.target_status || '').toLowerCase())
+            ? String(source.target_status).toLowerCase()
+            : 'all',
+        action: ['remove', 'disable', 'enable'].includes(String(source.action || '').toLowerCase())
+            ? String(source.action).toLowerCase()
+            : 'remove',
+        plan_types: normalizedPlans.length > 0 ? normalizedPlans : ['all'],
+        fallback_to_weekly: !!source.fallback_to_weekly,
+    };
+}
+
+function buildDefaultCpaPolicyRules(minWeeklyPercent) {
+    const normalizedMin = Number.isFinite(minWeeklyPercent) ? minWeeklyPercent : 20;
+    return [
+        {
+            id: 'invalid_free_remove',
+            name: 'Free 失效直接剔除',
+            enabled: true,
+            task: 'invalid',
+            condition: 'invalid_signal',
+            operator: 'lt',
+            threshold: 0,
+            target_status: 'all',
+            action: 'remove',
+            plan_types: ['free'],
+            fallback_to_weekly: false,
+        },
+        {
+            id: 'invalid_paid_disable',
+            name: '付费套餐失效先禁用',
+            enabled: true,
+            task: 'invalid',
+            condition: 'invalid_signal',
+            operator: 'lt',
+            threshold: 0,
+            target_status: 'enabled',
+            action: 'disable',
+            plan_types: ['plus', 'team', 'pro'],
+            fallback_to_weekly: false,
+        },
+        {
+            id: 'quota_paid_low_disable',
+            name: '付费 5 小时额度过低先禁用',
+            enabled: true,
+            task: 'quota',
+            condition: 'five_hour_remaining_percent',
+            operator: 'lt',
+            threshold: 5,
+            target_status: 'enabled',
+            action: 'disable',
+            plan_types: ['plus', 'team', 'pro'],
+            fallback_to_weekly: false,
+        },
+        {
+            id: 'quota_paid_recover_enable',
+            name: '付费额度恢复自动启用',
+            enabled: true,
+            task: 'quota',
+            condition: 'five_hour_remaining_percent',
+            operator: 'gte',
+            threshold: normalizedMin,
+            target_status: 'disabled',
+            action: 'enable',
+            plan_types: ['plus', 'team', 'pro'],
+            fallback_to_weekly: true,
+        },
+        {
+            id: 'quota_free_recover_enable',
+            name: 'Free 周限额恢复自动启用',
+            enabled: true,
+            task: 'quota',
+            condition: 'weekly_remaining_percent',
+            operator: 'gte',
+            threshold: normalizedMin,
+            target_status: 'disabled',
+            action: 'enable',
+            plan_types: ['free'],
+            fallback_to_weekly: false,
+        },
+    ];
+}
+
+function getRuleSelectHtml(options, selectedValue) {
+    return options.map(opt => {
+        const selected = opt.value === selectedValue ? 'selected' : '';
+        return `<option value="${opt.value}" ${selected}>${opt.label}</option>`;
+    }).join('');
+}
+
+function renderCpaPolicyRules() {
+    if (!elements.cpaPolicyRulesContainer) return;
+    if (!Array.isArray(cpaPolicyRulesState)) cpaPolicyRulesState = [];
+
+    elements.cpaPolicyRulesContainer.innerHTML = cpaPolicyRulesState.map((rule, index) => {
+        const normalized = normalizeCpaPolicyRule(rule, index);
+        const planSet = new Set(normalized.plan_types || []);
+        const allChecked = planSet.has('all');
+        const planHtml = `
+            <label class="cpa-policy-rule-plan-item">
+                <input type="checkbox" class="cpa-rule-plan" data-plan="all" ${allChecked ? 'checked' : ''}>
+                <span>全部</span>
+            </label>
+            ${CPA_RULE_PLAN_OPTIONS.map(plan => {
+                const checked = allChecked || planSet.has(plan);
+                const labelMap = {
+                    free: 'Free',
+                    plus: 'Plus',
+                    team: 'Team',
+                    pro: 'Pro',
+                    unknown: '未知',
+                };
+                return `<label class="cpa-policy-rule-plan-item">
+                    <input type="checkbox" class="cpa-rule-plan" data-plan="${plan}" ${checked ? 'checked' : ''}>
+                    <span>${labelMap[plan] || plan}</span>
+                </label>`;
+            }).join('')}
+        `;
+
+        return `
+            <div class="cpa-policy-rule" data-rule-index="${index}" data-rule-id="${normalized.id}">
+                <div class="cpa-policy-rule-head">
+                    <label style="display:flex;align-items:center;gap:6px;margin:0;">
+                        <input type="checkbox" class="cpa-rule-enabled" ${normalized.enabled ? 'checked' : ''}>
+                        <span>启用规则 ${index + 1}</span>
+                    </label>
+                    <button type="button" class="btn btn-ghost btn-sm cpa-rule-delete-btn">删除</button>
+                </div>
+                <div class="cpa-policy-rule-grid">
+                    <div class="form-group">
+                        <label>任务类型</label>
+                        <select class="cpa-rule-task">${getRuleSelectHtml(CPA_RULE_TASK_OPTIONS, normalized.task)}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>条件类型</label>
+                        <select class="cpa-rule-condition">${getRuleSelectHtml(CPA_RULE_CONDITION_OPTIONS, normalized.condition)}</select>
+                    </div>
+                    <div class="form-group cpa-rule-operator-wrap">
+                        <label>比较符</label>
+                        <select class="cpa-rule-operator">${getRuleSelectHtml(CPA_RULE_OPERATOR_OPTIONS, normalized.operator)}</select>
+                    </div>
+                    <div class="form-group cpa-rule-threshold-wrap">
+                        <label>阈值 (%)</label>
+                        <input type="number" class="cpa-rule-threshold" min="0" max="100" step="0.1" value="${normalized.threshold}">
+                    </div>
+                    <div class="form-group">
+                        <label>作用对象</label>
+                        <select class="cpa-rule-target-status">${getRuleSelectHtml(CPA_RULE_TARGET_STATUS_OPTIONS, normalized.target_status)}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>命中动作</label>
+                        <select class="cpa-rule-action">${getRuleSelectHtml(CPA_RULE_ACTION_OPTIONS, normalized.action)}</select>
+                    </div>
+                </div>
+                <div class="cpa-policy-rule-plan-list">
+                    ${planHtml}
+                </div>
+                <label class="cpa-policy-rule-fallback cpa-rule-fallback-wrap">
+                    <input type="checkbox" class="cpa-rule-fallback" ${normalized.fallback_to_weekly ? 'checked' : ''}>
+                    <span>当 5 小时限额字段不存在时，回退使用周限额字段</span>
+                </label>
+            </div>
+        `;
+    }).join('');
+
+    if (cpaPolicyRulesState.length === 0) {
+        elements.cpaPolicyRulesContainer.innerHTML = '<small style="color: var(--text-muted);">暂无规则，点击“添加规则”创建。</small>';
+    }
+
+    syncAllCpaRuleVisibility();
+}
+
+function syncCpaRuleVisibility(ruleEl) {
+    if (!ruleEl) return;
+    const conditionEl = ruleEl.querySelector('.cpa-rule-condition');
+    const condition = conditionEl ? conditionEl.value : 'invalid_signal';
+    const isInvalidCondition = condition === 'invalid_signal';
+    const isFiveHourCondition = condition === 'five_hour_remaining_percent';
+
+    const operatorWrap = ruleEl.querySelector('.cpa-rule-operator-wrap');
+    const thresholdWrap = ruleEl.querySelector('.cpa-rule-threshold-wrap');
+    const fallbackWrap = ruleEl.querySelector('.cpa-rule-fallback-wrap');
+    if (operatorWrap) operatorWrap.style.display = isInvalidCondition ? 'none' : '';
+    if (thresholdWrap) thresholdWrap.style.display = isInvalidCondition ? 'none' : '';
+    if (fallbackWrap) fallbackWrap.style.display = isFiveHourCondition ? '' : 'none';
+}
+
+function syncAllCpaRuleVisibility() {
+    if (!elements.cpaPolicyRulesContainer) return;
+    elements.cpaPolicyRulesContainer.querySelectorAll('.cpa-policy-rule').forEach(ruleEl => {
+        syncCpaRuleVisibility(ruleEl);
+    });
+}
+
+function collectCpaPolicyRulesFromUi() {
+    if (!elements.cpaPolicyRulesContainer) return [];
+    const rows = Array.from(elements.cpaPolicyRulesContainer.querySelectorAll('.cpa-policy-rule'));
+    return rows.map((row, index) => {
+        const id = row.dataset.ruleId || `rule_${index + 1}`;
+        const enabled = !!row.querySelector('.cpa-rule-enabled')?.checked;
+        const task = row.querySelector('.cpa-rule-task')?.value || 'invalid';
+        const condition = row.querySelector('.cpa-rule-condition')?.value || 'invalid_signal';
+        const operator = row.querySelector('.cpa-rule-operator')?.value || 'lt';
+        const threshold = parseFloat(row.querySelector('.cpa-rule-threshold')?.value || '0') || 0;
+        const targetStatus = row.querySelector('.cpa-rule-target-status')?.value || 'all';
+        const action = row.querySelector('.cpa-rule-action')?.value || 'remove';
+        const fallbackToWeekly = !!row.querySelector('.cpa-rule-fallback')?.checked;
+
+        const planCheckboxes = Array.from(row.querySelectorAll('.cpa-rule-plan:checked'));
+        let planTypes = planCheckboxes
+            .map(cb => String(cb.dataset.plan || '').trim().toLowerCase())
+            .filter(Boolean);
+        if (planTypes.includes('all') || planTypes.length === 0) {
+            planTypes = ['all'];
+        } else {
+            planTypes = planTypes.filter(v => v !== 'all');
+        }
+
+        return normalizeCpaPolicyRule({
+            id,
+            enabled,
+            task,
+            condition,
+            operator,
+            threshold,
+            target_status: targetStatus,
+            action,
+            plan_types: planTypes,
+            fallback_to_weekly: fallbackToWeekly,
+        }, index);
+    });
 }
 
 // 初始化注册后自动操作选项（CPA / Sub2API / TM）
@@ -467,6 +758,15 @@ function initEventListeners() {
         loadRecentAccounts();
         toast.info('已刷新');
     });
+    if (elements.refreshUnauthorizedBtn) {
+        elements.refreshUnauthorizedBtn.addEventListener('click', () => {
+            loadUnauthorizedAccounts();
+            toast.info('未授权账号已刷新');
+        });
+    }
+    if (elements.clearUnauthorizedBtn) {
+        elements.clearUnauthorizedBtn.addEventListener('click', handleClearUnauthorizedAccounts);
+    }
 
     // 并发模式切换
     elements.concurrencyMode.addEventListener('change', () => {
@@ -482,11 +782,19 @@ function initEventListeners() {
     if (elements.cpaStopTaskBtn) {
         elements.cpaStopTaskBtn.addEventListener('click', handleStopSchedulerTask);
     }
-    if (elements.cpaForceRemove401Btn) {
-        elements.cpaForceRemove401Btn.addEventListener('click', handleForceRemove401Cpa);
-    }
     if (elements.cpaForceCheckBtn) {
         elements.cpaForceCheckBtn.addEventListener('click', handleForceCheckCpa);
+    }
+    if (elements.cpaAddPolicyRuleBtn) {
+        elements.cpaAddPolicyRuleBtn.addEventListener('click', handleAddCpaPolicyRule);
+    }
+    if (elements.cpaAutoCheckEnabled) {
+        elements.cpaAutoCheckEnabled.addEventListener('change', updateCpaCheckMasterToggleUI);
+        updateCpaCheckMasterToggleUI();
+    }
+    if (elements.cpaPolicyRulesContainer) {
+        elements.cpaPolicyRulesContainer.addEventListener('click', handleCpaPolicyRuleContainerClick);
+        elements.cpaPolicyRulesContainer.addEventListener('change', handleCpaPolicyRuleContainerChange);
     }
     if (elements.outlookAccountsContainer) {
         elements.outlookAccountsContainer.addEventListener('change', (e) => {
@@ -500,30 +808,100 @@ function initEventListeners() {
     startSystemLogPolling();
 }
 
+function handleAddCpaPolicyRule() {
+    const newRule = normalizeCpaPolicyRule({
+        id: `rule_${Date.now()}`,
+        enabled: true,
+        task: 'quota',
+        condition: 'weekly_remaining_percent',
+        operator: 'lt',
+        threshold: 20,
+        target_status: 'enabled',
+        action: 'disable',
+        plan_types: ['all'],
+        fallback_to_weekly: false,
+    }, cpaPolicyRulesState.length);
+    cpaPolicyRulesState.push(newRule);
+    renderCpaPolicyRules();
+}
+
+function handleCpaPolicyRuleContainerClick(event) {
+    const deleteBtn = event.target.closest('.cpa-rule-delete-btn');
+    if (!deleteBtn) return;
+    const row = deleteBtn.closest('.cpa-policy-rule');
+    if (!row) return;
+    const index = parseInt(row.dataset.ruleIndex || '-1', 10);
+    if (Number.isNaN(index) || index < 0) return;
+    cpaPolicyRulesState.splice(index, 1);
+    renderCpaPolicyRules();
+}
+
+function handleCpaPolicyRuleContainerChange(event) {
+    const target = event.target;
+    const row = target.closest('.cpa-policy-rule');
+    if (!row) return;
+
+    if (target.classList.contains('cpa-rule-condition')) {
+        syncCpaRuleVisibility(row);
+    }
+
+    if (target.classList.contains('cpa-rule-plan')) {
+        const plan = target.dataset.plan;
+        const allPlan = row.querySelector('.cpa-rule-plan[data-plan="all"]');
+        const normalPlanCheckboxes = Array.from(row.querySelectorAll('.cpa-rule-plan')).filter(cb => cb.dataset.plan !== 'all');
+
+        if (plan === 'all') {
+            if (allPlan && allPlan.checked) {
+                normalPlanCheckboxes.forEach(cb => { cb.checked = true; });
+            }
+        } else {
+            if (allPlan && target.checked === false) {
+                allPlan.checked = false;
+            }
+            const checkedNormalCount = normalPlanCheckboxes.filter(cb => cb.checked).length;
+            if (checkedNormalCount === normalPlanCheckboxes.length && checkedNormalCount > 0) {
+                if (allPlan) allPlan.checked = true;
+            } else {
+                if (allPlan) allPlan.checked = false;
+            }
+            if (checkedNormalCount === 0 && allPlan) {
+                allPlan.checked = true;
+                normalPlanCheckboxes.forEach(cb => { cb.checked = true; });
+            }
+        }
+    }
+}
+
 async function handleSaveSchedulerConfig() {
     elements.cpaSaveConfigBtn.disabled = true;
     elements.cpaSaveConfigBtn.textContent = "保存中...";
     try {
         const emailServicePool = getSelectedEmailServiceValues().filter(v => v !== 'outlook_batch:all');
+        const policyRules = collectCpaPolicyRulesFromUi();
+        cpaPolicyRulesState = policyRules;
         await api.post('/scheduler/config', {
             check_enabled: elements.cpaAutoCheckEnabled.checked,
             check_mode: elements.cpaCheckMode ? elements.cpaCheckMode.value : 'panel',
-            check_remove_401: elements.cpaAutoRemove401 ? elements.cpaAutoRemove401.checked : false,
-            check_remove_401_interval: elements.cpaCheck401Interval ? (parseInt(elements.cpaCheck401Interval.value) || 3) : 3,
+            check_remove_401: false,
+            check_remove_401_interval: 3,
             check_interval: parseInt(elements.cpaCheckInterval.value) || 60,
-            check_sleep: parseInt(elements.cpaCheckSleep.value) || 0,
+            check_sleep: CPA_CHECK_FIXED_SLEEP_SECONDS,
             check_min_remaining_weekly_percent: parseInt(elements.cpaCheckMinRemainingWeeklyPercent.value) || 0,
-            test_url: elements.cpaTestUrl.value,
-            test_model: elements.cpaTestModel ? elements.cpaTestModel.value : "",
+            test_url: CPA_CHECK_FIXED_TEST_URL,
+            test_model: CPA_CHECK_FIXED_TEST_MODEL,
             register_enabled: elements.cpaAutoRegisterEnabled.checked,
             register_threshold: parseInt(elements.cpaRegisterThreshold.value) || 10,
             register_batch_count: parseInt(elements.cpaRegisterBatchCount.value) || 5,
             email_service: emailServicePool.join(','),
-            token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser',
+            token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser_http_only',
+            policy_rules: policyRules,
         });
         toast.success("自动任务配置已保存");
         addLog('success', '[系统] 定时 CPA 任务及注册配置已保存');
-        updateCpaSchedulerBadge(elements.cpaAutoCheckEnabled.checked);
+        updateCpaSchedulerBadge(
+            !!(elements.cpaAutoCheckEnabled.checked || elements.cpaAutoRegisterEnabled.checked)
+        );
+        updateCpaCheckMasterToggleUI();
     } catch (e) {
         toast.error("保存失败: " + e.message);
     } finally {
@@ -536,23 +914,27 @@ async function handleStopSchedulerTask() {
     elements.cpaStopTaskBtn.disabled = true;
     elements.cpaAutoCheckEnabled.checked = false;
     elements.cpaAutoRegisterEnabled.checked = false;
+    updateCpaCheckMasterToggleUI();
     try {
         const emailServicePool = getSelectedEmailServiceValues().filter(v => v !== 'outlook_batch:all');
+        const policyRules = collectCpaPolicyRulesFromUi();
+        cpaPolicyRulesState = policyRules;
         await api.post('/scheduler/config', {
             check_enabled: false,
             check_mode: elements.cpaCheckMode ? elements.cpaCheckMode.value : 'panel',
-            check_remove_401: elements.cpaAutoRemove401 ? elements.cpaAutoRemove401.checked : false,
-            check_remove_401_interval: elements.cpaCheck401Interval ? (parseInt(elements.cpaCheck401Interval.value) || 3) : 3,
+            check_remove_401: false,
+            check_remove_401_interval: 3,
             check_interval: parseInt(elements.cpaCheckInterval.value) || 60,
-            check_sleep: parseInt(elements.cpaCheckSleep.value) || 0,
+            check_sleep: CPA_CHECK_FIXED_SLEEP_SECONDS,
             check_min_remaining_weekly_percent: parseInt(elements.cpaCheckMinRemainingWeeklyPercent.value) || 0,
-            test_url: elements.cpaTestUrl.value,
-            test_model: elements.cpaTestModel ? elements.cpaTestModel.value : "",
+            test_url: CPA_CHECK_FIXED_TEST_URL,
+            test_model: CPA_CHECK_FIXED_TEST_MODEL,
             register_enabled: false,
             register_threshold: parseInt(elements.cpaRegisterThreshold.value) || 10,
             register_batch_count: parseInt(elements.cpaRegisterBatchCount.value) || 5,
             email_service: emailServicePool.join(','),
-            token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser',
+            token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser_http_only',
+            policy_rules: policyRules,
         });
         toast.info("已停止自动任务");
         addLog('warning', '[系统] 🔴 定时监控与自动注册已被手动停止');
@@ -592,34 +974,6 @@ async function handleForceCheckCpa() {
     }
 }
 
-async function handleForceRemove401Cpa() {
-    elements.cpaForceRemove401Btn.disabled = true;
-    addLog('info', '[系统] 🚀 正在发起 401/403/usage_limit_reached 快速剔除 (请稍候)...');
-    try {
-        const res = await api.post('/scheduler/trigger-401');
-        if (res.logs && res.logs.length > 0) {
-            res.logs.forEach(msg => {
-                let level = 'info';
-                if (msg.includes('[WARNING]')) level = 'warning';
-                if (msg.includes('[ERROR]')) level = 'error';
-                addLog(level, msg);
-            });
-        } else {
-            addLog('warning', '[系统] 快速剔除执行完毕，但无日志返回！');
-        }
-        if (res.success) {
-            toast.success(res.message || "401/403/usage_limit_reached 快速剔除执行完毕");
-        } else {
-            toast.error(res.message || "执行中发生错误");
-        }
-    } catch (e) {
-        toast.error("触发失败: " + e.message);
-        addLog('error', '[错误] 401/403/usage_limit_reached 快速剔除触发失败: ' + e.message);
-    } finally {
-        elements.cpaForceRemove401Btn.disabled = false;
-    }
-}
-
 function updateCpaSchedulerBadge(isEnabled) {
     const badge = document.getElementById('cpa-scheduler-status-badge');
     if (!badge) return;
@@ -630,7 +984,19 @@ function updateCpaSchedulerBadge(isEnabled) {
     } else {
         badge.textContent = '🔴 未开启';
         badge.style.backgroundColor = 'rgba(244, 67, 54, 0.1)';
-        badge.style.color = 'var(--error-color)';
+        badge.style.color = 'var(--danger-color)';
+    }
+}
+
+function updateCpaCheckMasterToggleUI() {
+    const enabled = !!(elements.cpaAutoCheckEnabled && elements.cpaAutoCheckEnabled.checked);
+    if (elements.cpaMasterToggleWrap) {
+        elements.cpaMasterToggleWrap.classList.toggle('enabled', enabled);
+    }
+    if (elements.cpaCheckMasterStatus) {
+        elements.cpaCheckMasterStatus.textContent = enabled ? '已启用' : '已关闭';
+        elements.cpaCheckMasterStatus.classList.toggle('on', enabled);
+        elements.cpaCheckMasterStatus.classList.toggle('off', !enabled);
     }
 }
 
@@ -686,16 +1052,7 @@ function updateEmailServiceOptions() {
         services.forEach(service => items.push(builder(service)));
     };
 
-    // 临时邮箱
-    const tempmailServices = availableServices.tempmail?.services || [];
-    addGroup('🌐 临时邮箱', tempmailServices, (service) => {
-        const serviceType = service.type || 'tempmail';
-        const value = `${serviceType}:${service.id || 'default'}`;
-        return `<label class="msd-item">
-            <input type="checkbox" value="${value}" data-type="${serviceType}">
-            <span>${escapeHtml(service.name)}</span>
-        </label>`;
-    }, '暂无可用服务');
+    // 新版暂不展示 Tempmail.lol / Generator.email 两个临时邮箱渠道
 
     // Outlook
     const outlookServices = availableServices.outlook?.services || [];
@@ -738,7 +1095,7 @@ function updateEmailServiceOptions() {
         }, '暂无可用服务');
     }
 
-    // DuckMail
+    // Duck 邮箱服务（包含 DuckMail.sbs 与 DuckDuckMail）
     if (availableServices.duck_mail?.available) {
         addGroup(`🦆 DuckMail (${availableServices.duck_mail.count} 个服务)`, availableServices.duck_mail.services, (service) => {
             const value = `duck_mail:${service.id}`;
@@ -750,9 +1107,9 @@ function updateEmailServiceOptions() {
         }, '暂无可用服务');
     }
 
-    // CloudMail
+    // CloudMail（推荐）
     if (availableServices.cloud_mail?.available) {
-        addGroup(`☁️ CloudMail (${availableServices.cloud_mail.count} 个服务)`, availableServices.cloud_mail.services, (service) => {
+        addGroup(`☁️ CloudMail（推荐，${availableServices.cloud_mail.count} 个服务）`, availableServices.cloud_mail.services, (service) => {
             const value = `cloud_mail:${service.id}`;
             const label = service.name + (service.default_domain ? ` (@${service.default_domain})` : '');
             return `<label class="msd-item">
@@ -780,8 +1137,10 @@ function updateEmailServiceOptions() {
     if (!applied) {
         const checked = container.querySelectorAll('.msd-item input[type=checkbox]:checked');
         if (checked.length === 0) {
+            const cloudMail = Array.from(allCheckboxes).find(cb => cb.value.startsWith('cloud_mail:'));
             const firstNormal = Array.from(allCheckboxes).find(cb => cb.value !== 'outlook_batch:all');
-            if (firstNormal) firstNormal.checked = true;
+            const preferred = cloudMail || firstNormal;
+            if (preferred) preferred.checked = true;
         }
     }
     suppressFormStateSave = false;
@@ -908,7 +1267,7 @@ async function handleStartRegistration(e) {
     // 构建请求数据（代理从设置中自动获取）
     const requestData = {
         email_service_type: emailServiceType,
-        token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser',
+        token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser_http_only',
         auto_upload_cpa: elements.autoUploadCpa ? elements.autoUploadCpa.checked : false,
         cpa_service_ids: elements.autoUploadCpa && elements.autoUploadCpa.checked ? getSelectedServiceIds(elements.cpaServiceSelect) : [],
         auto_upload_sub2api: elements.autoUploadSub2api ? elements.autoUploadSub2api.checked : false,
@@ -1135,11 +1494,11 @@ async function handleBatchRegistration(requestData) {
     }
 }
 
-// 取消任务
+// 停止注册任务
 async function handleCancelTask() {
     // 禁用取消按钮，防止重复点击
     elements.cancelBtn.disabled = true;
-    addLog('info', '[系统] 正在提交取消请求...');
+    addLog('info', '[系统] 正在提交停止请求...');
 
     try {
         // 批量任务取消（包括普通批量模式和 Outlook 批量模式）
@@ -1147,8 +1506,8 @@ async function handleCancelTask() {
             // 优先通过 WebSocket 取消
             if (batchWebSocket && batchWebSocket.readyState === WebSocket.OPEN) {
                 batchWebSocket.send(JSON.stringify({ type: 'cancel' }));
-                addLog('warning', '[警告] 批量任务取消请求已提交');
-                toast.info('任务取消请求已提交');
+                addLog('warning', '[警告] 批量任务停止请求已提交');
+                toast.info('停止注册请求已提交');
             } else {
                 // 降级到 REST API
                 const endpoint = isOutlookBatchMode
@@ -1156,8 +1515,8 @@ async function handleCancelTask() {
                     : `/registration/batch/${currentBatch.batch_id}/cancel`;
 
                 await api.post(endpoint);
-                addLog('warning', '[警告] 批量任务取消请求已提交');
-                toast.info('任务取消请求已提交');
+                addLog('warning', '[警告] 批量任务停止请求已提交');
+                toast.info('停止注册请求已提交');
                 stopBatchPolling();
                 resetButtons();
             }
@@ -1167,8 +1526,8 @@ async function handleCancelTask() {
             // 优先通过 WebSocket 取消
             if (webSocket && webSocket.readyState === WebSocket.OPEN) {
                 webSocket.send(JSON.stringify({ type: 'cancel' }));
-                addLog('warning', '[警告] 任务取消请求已提交');
-                toast.info('任务取消请求已提交');
+                addLog('warning', '[警告] 停止注册请求已提交');
+                toast.info('停止注册请求已提交');
             } else {
                 // 降级到 REST API
                 await api.post(`/registration/tasks/${currentTask.task_uuid}/cancel`);
@@ -1180,12 +1539,12 @@ async function handleCancelTask() {
         }
         // 没有活动任务
         else {
-            addLog('warning', '[警告] 没有活动的任务可以取消');
-            toast.warning('没有活动的任务');
+            addLog('warning', '[警告] 没有活动的注册任务');
+            toast.warning('没有活动的注册任务');
             resetButtons();
         }
     } catch (error) {
-        addLog('error', `[错误] 取消失败: ${error.message}`);
+        addLog('error', `[错误] 停止失败: ${error.message}`);
         toast.error(error.message);
         // 恢复取消按钮，允许重试
         elements.cancelBtn.disabled = false;
@@ -1372,7 +1731,7 @@ async function loadRecentAccounts() {
         if (data.accounts.length === 0) {
             elements.recentAccountsTable.innerHTML = `
                 <tr>
-                    <td colspan="5">
+                    <td colspan="4">
                         <div class="empty-state" style="padding: var(--spacing-md);">
                             <div class="empty-state-icon">📭</div>
                             <div class="empty-state-title">暂无已注册账号</div>
@@ -1380,6 +1739,7 @@ async function loadRecentAccounts() {
                     </td>
                 </tr>
             `;
+            await loadUnauthorizedAccounts();
             return;
         }
 
@@ -1413,9 +1773,82 @@ async function loadRecentAccounts() {
         elements.recentAccountsTable.querySelectorAll('.copy-pwd-btn').forEach(btn => {
             btn.addEventListener('click', (e) => { e.stopPropagation(); copyToClipboard(btn.dataset.pwd); });
         });
+        await loadUnauthorizedAccounts();
 
     } catch (error) {
         console.error('加载账号列表失败:', error);
+        await loadUnauthorizedAccounts();
+    }
+}
+
+// 加载未授权账号（待授权）
+async function loadUnauthorizedAccounts() {
+    if (!elements.unauthorizedAccountsTable || !elements.unauthorizedCount) return;
+    try {
+        const data = await api.get('/accounts?page=1&page_size=20&status=pending_oauth');
+        const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+        const total = Number.isFinite(data.total) ? data.total : accounts.length;
+        elements.unauthorizedCount.textContent = String(total);
+
+        if (accounts.length === 0) {
+            elements.unauthorizedAccountsTable.innerHTML = `
+                <tr>
+                    <td colspan="3">
+                        <div class="empty-state" style="padding: var(--spacing-md);">
+                            <div class="empty-state-icon">✅</div>
+                            <div class="empty-state-title">暂无未授权账号</div>
+                        </div>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        elements.unauthorizedAccountsTable.innerHTML = accounts.map(account => `
+            <tr data-id="${account.id}">
+                <td>${account.id}</td>
+                <td title="${escapeHtml(account.email)}">${escapeHtml(account.email)}</td>
+                <td>${getStatusIcon(account.status)}</td>
+            </tr>
+        `).join('');
+    } catch (error) {
+        console.error('加载未授权账号失败:', error);
+    }
+}
+
+// 一键清理未授权账号（pending_oauth）
+async function handleClearUnauthorizedAccounts() {
+    try {
+        const data = await api.get('/accounts?page=1&page_size=1&status=pending_oauth');
+        const total = Number.isFinite(data.total) ? data.total : 0;
+        if (total <= 0) {
+            toast.info('当前没有未授权账号');
+            return;
+        }
+
+        const ok = await confirm(`确认清理 ${total} 个未授权账号吗？`, '清理未授权账号');
+        if (!ok) return;
+
+        if (elements.clearUnauthorizedBtn) {
+            elements.clearUnauthorizedBtn.disabled = true;
+            elements.clearUnauthorizedBtn.textContent = '清理中...';
+        }
+
+        const result = await api.post('/accounts/batch-delete', {
+            ids: [],
+            select_all: true,
+            status_filter: 'pending_oauth'
+        });
+        const deleted = Number(result.deleted_count || 0);
+        toast.success(`已清理 ${deleted} 个未授权账号`);
+        await loadRecentAccounts();
+    } catch (error) {
+        toast.error(`清理失败: ${error.message}`);
+    } finally {
+        if (elements.clearUnauthorizedBtn) {
+            elements.clearUnauthorizedBtn.disabled = false;
+            elements.clearUnauthorizedBtn.textContent = '🧹 一键清理';
+        }
     }
 }
 
@@ -1450,7 +1883,9 @@ function addLog(type, message) {
     const timestamp = new Date().toLocaleTimeString('zh-CN', {
         hour: '2-digit',
         minute: '2-digit',
-        second: '2-digit'
+        second: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Shanghai'
     });
 
     line.innerHTML = `<span class="timestamp">[${timestamp}]</span>${escapeHtml(message)}`;
@@ -1624,7 +2059,7 @@ async function handleOutlookBatchRegistration() {
     const requestData = {
         service_ids: selectedIds,
         skip_registered: skipRegistered,
-        token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser',
+        token_mode: elements.tokenMode ? elements.tokenMode.value : 'browser_http_only',
         interval_min: intervalMin,
         interval_max: intervalMax,
         concurrency: Math.min(50, Math.max(1, concurrency)),

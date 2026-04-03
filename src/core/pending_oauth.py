@@ -127,26 +127,81 @@ def _normalize_email_service_config(
 
     if "api_url" in normalized and "base_url" not in normalized:
         normalized["base_url"] = normalized.pop("api_url")
+    if "domain_select_strategy" in normalized and "domain_strategy" not in normalized:
+        normalized["domain_strategy"] = normalized.pop("domain_select_strategy")
 
     if service_type == EmailServiceType.CUSTOM_DOMAIN:
         if "domain" in normalized and "default_domain" not in normalized:
             normalized["default_domain"] = normalized.pop("domain")
+        strategy = str(normalized.get("domain_strategy") or "").strip().lower()
+        normalized["domain_strategy"] = strategy if strategy in ("round_robin", "random") else "round_robin"
     elif service_type == EmailServiceType.TEMP_MAIL:
         if "default_domain" in normalized and "domain" not in normalized:
             normalized["domain"] = normalized.pop("default_domain")
+        strategy = str(normalized.get("domain_strategy") or "").strip().lower()
+        normalized["domain_strategy"] = strategy if strategy in ("round_robin", "random") else "round_robin"
     elif service_type == EmailServiceType.DUCK_MAIL:
         if "domain" in normalized and "default_domain" not in normalized:
             normalized["default_domain"] = normalized.pop("domain")
+        strategy = str(normalized.get("domain_strategy") or "").strip().lower()
+        normalized["domain_strategy"] = strategy if strategy in ("round_robin", "random") else "round_robin"
+        if "receiver_email" in normalized and "receiver_inbox_email" not in normalized:
+            normalized["receiver_inbox_email"] = normalized.pop("receiver_email")
+        receiver_service_id = normalized.get("receiver_service_id")
+        if receiver_service_id is not None and str(receiver_service_id).strip() != "":
+            try:
+                normalized["receiver_service_id"] = int(receiver_service_id)
+            except Exception:
+                normalized.pop("receiver_service_id", None)
     elif service_type == EmailServiceType.CLOUD_MAIL:
         if "domain" in normalized and "default_domain" not in normalized:
             normalized["default_domain"] = normalized.pop("domain")
         if "token" in normalized and "api_token" not in normalized:
             normalized["api_token"] = normalized.pop("token")
+        strategy = str(normalized.get("domain_strategy") or "").strip().lower()
+        normalized["domain_strategy"] = strategy if strategy in ("round_robin", "random") else "round_robin"
 
     if proxy_url and "proxy_url" not in normalized:
         normalized["proxy_url"] = proxy_url
 
     return normalized
+
+
+def _resolve_duck_receiver_service_config(db, duck_config: Optional[dict], proxy_url: Optional[str] = None) -> dict:
+    if not isinstance(duck_config, dict):
+        return duck_config or {}
+    resolved = duck_config.copy()
+    receiver_service_id = resolved.get("receiver_service_id")
+    if receiver_service_id in (None, "", 0, "0"):
+        return resolved
+
+    try:
+        receiver_service_id = int(receiver_service_id)
+    except Exception:
+        raise ValueError(f"Duck 收件后端服务 ID 无效: {receiver_service_id}")
+
+    services = crud.get_email_services(db, enabled=True, limit=1000)
+    receiver_service = next((svc for svc in services if svc.id == receiver_service_id), None)
+    if not receiver_service:
+        raise ValueError(f"Duck 收件后端服务不存在或已禁用: {receiver_service_id}")
+
+    try:
+        receiver_type = EmailServiceType(receiver_service.service_type)
+    except Exception:
+        raise ValueError(f"Duck 收件后端类型不受支持: {receiver_service.service_type}")
+    if receiver_type == EmailServiceType.DUCK_MAIL:
+        raise ValueError("Duck 收件后端不能再使用 DuckMail")
+
+    receiver_cfg = _normalize_email_service_config(receiver_type, receiver_service.config or {}, proxy_url)
+    receiver_inbox_email = str(resolved.get("receiver_inbox_email") or "").strip()
+    if receiver_inbox_email:
+        receiver_cfg.setdefault("inbox_email", receiver_inbox_email)
+
+    resolved["receiver_service_id"] = receiver_service.id
+    resolved["receiver_service_type"] = receiver_type.value
+    resolved["receiver_service_name"] = receiver_service.name or receiver_type.value
+    resolved["receiver_service_config"] = receiver_cfg
+    return resolved
 
 
 def _safe_log(logs: Optional[List[str]], message: str, *, level: str = "info") -> None:
@@ -250,6 +305,9 @@ def _build_email_service_for_account(account: Account):
                 break
 
     config = _normalize_email_service_config(service_type, selected.config or {}, proxy_url)
+    if service_type == EmailServiceType.DUCK_MAIL:
+        with get_db() as db:
+            config = _resolve_duck_receiver_service_config(db, config, proxy_url)
     return EmailServiceFactory.create(service_type, config), mailbox_id
 
 

@@ -25,7 +25,8 @@ from ..config.settings import get_settings
 def setup_logging(
     log_level: str = "INFO",
     log_file: Optional[str] = None,
-    log_format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    log_format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    enable_console: bool = True,
 ) -> logging.Logger:
     """
     配置日志系统
@@ -34,6 +35,7 @@ def setup_logging(
         log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: 日志文件路径，如果不指定则只输出到控制台
         log_format: 日志格式
+        enable_console: 是否输出到控制台（stdout）
 
     Returns:
         根日志记录器
@@ -54,10 +56,11 @@ def setup_logging(
     formatter = logging.Formatter(log_format)
 
     # 控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(numeric_level)
-    root_logger.addHandler(console_handler)
+    if enable_console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(numeric_level)
+        root_logger.addHandler(console_handler)
 
     # 文件处理器（如果指定了日志文件）
     if log_file:
@@ -70,6 +73,10 @@ def setup_logging(
         file_handler.setFormatter(formatter)
         file_handler.setLevel(numeric_level)
         root_logger.addHandler(file_handler)
+
+    # 当控制台与文件都未启用时，挂载空处理器，避免 fallback 输出到 stderr
+    if not root_logger.handlers:
+        root_logger.addHandler(logging.NullHandler())
 
     return root_logger
 

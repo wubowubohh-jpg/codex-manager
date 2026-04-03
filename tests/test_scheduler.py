@@ -87,9 +87,10 @@ def test_test_cliproxy_auth_file_marks_low_remaining_weekly_quota_invalid(monkey
         api_token="token-123",
     )
 
-    assert success is False
-    assert "周限额剩余 19%" in message
-    assert "低于阈值 20%" in message
+    # 新版逻辑下，“周限额低于阈值”由策略规则在限额任务中处理；
+    # 单次 probe 只要返回 200 且无硬错误即视为可用。
+    assert success is True
+    assert message == "status_code=200"
 
 
 def test_test_cliproxy_auth_file_allows_low_remaining_quota_when_threshold_disabled(monkeypatch):
@@ -127,10 +128,21 @@ def test_test_cliproxy_auth_file_allows_low_remaining_quota_when_threshold_disab
 
 
 def test_test_cliproxy_auth_file_marks_unavailable_item_invalid(monkeypatch):
-    def fail_post(*args, **kwargs):
-        raise AssertionError("unavailable 凭证不应继续调用 api-call")
+    calls = []
 
-    monkeypatch.setattr(scheduler_core.cffi_requests, "post", fail_post)
+    def fake_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeResponse(
+            status_code=200,
+            payload={
+                "status_code": 429,
+                "body": (
+                    '{"rate_limit": {"allowed": false, "limit_reached": true}}'
+                ),
+            },
+        )
+
+    monkeypatch.setattr(scheduler_core.cffi_requests, "post", fake_post)
 
     success, message = scheduler_core.test_cliproxy_auth_file(
         {
@@ -145,9 +157,9 @@ def test_test_cliproxy_auth_file_marks_unavailable_item_invalid(monkeypatch):
     )
 
     assert success is False
-    assert "unavailable" in message
+    assert "status_code=429" in message
     assert "周限额已耗尽" in message
-    assert "usage_limit_reached" in message
+    assert len(calls) == 1
 
 
 def test_trigger_cpa_scheduler_check_passes_manual_logs_correctly(monkeypatch):
@@ -180,3 +192,84 @@ def test_describe_cliproxy_failure_distinguishes_weekly_quota_cases():
         )
         == "周限额已耗尽"
     )
+
+
+def test_check_job_triggers_auto_register_when_check_disabled(monkeypatch):
+    class DummyDBContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    settings = SimpleNamespace(
+        cpa_auto_check_enabled=False,
+        cpa_auto_register_enabled=True,
+        cpa_auto_register_threshold=10,
+        cpa_auto_register_batch_count=3,
+    )
+    svc = SimpleNamespace(id=1, name="cpa", api_url="https://cpa.example.com", api_token="token")
+    scheduled = []
+
+    def fake_run_coroutine_threadsafe(coro, loop):
+        scheduled.append((coro, loop))
+        coro.close()
+        return SimpleNamespace()
+
+    monkeypatch.setattr(scheduler_core, "get_settings", lambda: settings)
+    monkeypatch.setattr(scheduler_core, "_is_checking", False)
+    monkeypatch.setattr(scheduler_core, "get_db", lambda: DummyDBContext())
+    monkeypatch.setattr(scheduler_core.crud, "get_cpa_services", lambda db, enabled=True: [svc])
+    monkeypatch.setattr(scheduler_core, "fetch_cliproxy_auth_files", lambda api_url, api_token: ([], 0, 0))
+    monkeypatch.setattr(
+        scheduler_core,
+        "_load_cpa_policy_rules",
+        lambda _settings: (_ for _ in ()).throw(AssertionError("check disabled 时不应加载策略规则")),
+    )
+    monkeypatch.setattr(scheduler_core.asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe)
+
+    scheduler_core.check_cpa_services_job(main_loop=object(), manual_logs=None)
+
+    assert len(scheduled) == 1
+
+
+def test_update_scheduler_config_triggers_once_when_only_register_enabled(monkeypatch):
+    class FakeLoop:
+        def run_in_executor(self, executor, func, *args):
+            return None
+
+    class FakeBackgroundTasks:
+        def __init__(self):
+            self.calls = []
+
+        def add_task(self, func, *args, **kwargs):
+            self.calls.append((func, args, kwargs))
+
+    monkeypatch.setattr(scheduler_route, "update_settings", lambda **kwargs: None)
+    monkeypatch.setattr(scheduler_route.asyncio, "get_event_loop", lambda: FakeLoop())
+
+    request = scheduler_route.CPASchedulerConfig(
+        check_enabled=False,
+        check_mode="panel",
+        check_remove_401=False,
+        check_remove_401_interval=3,
+        check_interval=30,
+        check_sleep=1,
+        check_min_remaining_weekly_percent=0,
+        test_url="https://chatgpt.com/backend-api/wham/usage",
+        test_model="gpt-5.2-codex",
+        register_enabled=True,
+        register_threshold=100,
+        register_batch_count=10,
+        email_service="cloud_mail:1",
+        token_mode="browser_http_only",
+        policy_rules=[],
+    )
+    background = FakeBackgroundTasks()
+
+    result = asyncio.run(
+        scheduler_route.update_cpa_scheduler_config(request, background)
+    )
+
+    assert result["success"] is True
+    assert len(background.calls) == 1

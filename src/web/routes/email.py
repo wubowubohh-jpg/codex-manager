@@ -81,10 +81,32 @@ class OutlookBatchImportResponse(BaseModel):
     errors: List[str]
 
 
+class CloudMailGenTokenRequest(BaseModel):
+    """CloudMail 通过管理员账号生成 Token"""
+    base_url: str
+    admin_email: str
+    admin_password: str
+
+
+class CloudMailGenTokenResponse(BaseModel):
+    """CloudMail 生成 Token 响应"""
+    success: bool
+    token: str
+
+
 # ============== Helper Functions ==============
 
 # 敏感字段列表，返回响应时需要过滤
-SENSITIVE_FIELDS = {'password', 'api_key', 'api_token', 'refresh_token', 'access_token'}
+SENSITIVE_FIELDS = {
+    'password',
+    'admin_password',
+    'api_key',
+    'api_token',
+    'refresh_token',
+    'access_token',
+    'duck_cookie',
+    'duck_api_token',
+}
 
 def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """过滤敏感配置信息"""
@@ -104,6 +126,88 @@ def filter_sensitive_config(config: Dict[str, Any]) -> Dict[str, Any]:
         filtered['has_oauth'] = True
 
     return filtered
+
+
+def _resolve_duck_receiver_for_test(db, config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    测试 DuckDuckMail 时，按 receiver_service_id 补全收件后端配置。
+    """
+    if not isinstance(config, dict):
+        return config or {}
+
+    resolved = dict(config)
+    receiver_service_id = resolved.get("receiver_service_id")
+    if receiver_service_id in (None, "", 0, "0"):
+        return resolved
+
+    try:
+        receiver_service_id = int(receiver_service_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"DuckDuckMail 收件后端服务 ID 无效: {receiver_service_id}")
+
+    receiver = db.query(EmailServiceModel).filter(
+        EmailServiceModel.id == receiver_service_id,
+        EmailServiceModel.enabled == True
+    ).first()
+    if not receiver:
+        raise HTTPException(status_code=400, detail=f"DuckDuckMail 收件后端服务不存在或已禁用: {receiver_service_id}")
+
+    receiver_type = str(receiver.service_type or "").strip().lower()
+    if receiver_type == EmailServiceType.DUCK_MAIL.value:
+        raise HTTPException(status_code=400, detail="DuckDuckMail 收件后端不能再选择 DuckDuckMail")
+
+    resolved["receiver_service_id"] = receiver.id
+    resolved["receiver_service_type"] = receiver_type
+    resolved["receiver_service_name"] = receiver.name or receiver_type
+    resolved["receiver_service_config"] = receiver.config or {}
+    receiver_inbox_email = str(resolved.get("receiver_inbox_email") or "").strip()
+    if receiver_inbox_email:
+        cfg = dict(resolved["receiver_service_config"] or {})
+        cfg.setdefault("inbox_email", receiver_inbox_email)
+        resolved["receiver_service_config"] = cfg
+    return resolved
+
+
+def _extract_http_exception_detail(exc: HTTPException) -> str:
+    detail = getattr(exc, "detail", "")
+    if isinstance(detail, str):
+        return detail.strip()
+    if detail is None:
+        return ""
+    try:
+        return str(detail).strip()
+    except Exception:
+        return ""
+
+
+def _build_service_test_details(email_service: Any) -> Dict[str, Any]:
+    details: Dict[str, Any] = {}
+    try:
+        if hasattr(email_service, "get_service_info"):
+            raw = email_service.get_service_info()
+            if isinstance(raw, dict):
+                details.update(raw)
+    except Exception:
+        pass
+
+    status_value = ""
+    try:
+        status = getattr(email_service, "status", None)
+        status_value = str(getattr(status, "value", status) or "").strip()
+    except Exception:
+        status_value = ""
+    if status_value and "status" not in details:
+        details["status"] = status_value
+
+    last_error = ""
+    try:
+        last_error = str(getattr(email_service, "last_error", "") or "").strip()
+    except Exception:
+        last_error = ""
+    if last_error and "last_error" not in details:
+        details["last_error"] = last_error
+
+    return details
 
 
 def service_to_response(service: EmailServiceModel) -> EmailServiceResponse:
@@ -197,7 +301,8 @@ async def get_service_types():
                 "config_fields": [
                     {"name": "base_url", "label": "API 地址", "required": True},
                     {"name": "api_key", "label": "API Key", "required": True},
-                    {"name": "default_domain", "label": "默认域名", "required": False},
+                    {"name": "default_domain", "label": "邮箱域名（建议一行一个，兼容逗号）", "required": False},
+                    {"name": "domain_strategy", "label": "域名选择策略", "required": False, "default": "round_robin"},
                 ]
             },
             {
@@ -207,18 +312,20 @@ async def get_service_types():
                 "config_fields": [
                     {"name": "base_url", "label": "Worker 地址", "required": True, "placeholder": "https://mail.example.com"},
                     {"name": "admin_password", "label": "Admin 密码", "required": True, "secret": True},
-                    {"name": "domain", "label": "邮箱域名", "required": True, "placeholder": "example.com"},
+                    {"name": "domain", "label": "邮箱域名（建议一行一个，兼容逗号）", "required": True, "placeholder": "a.com\\nb.com"},
+                    {"name": "domain_strategy", "label": "域名选择策略", "required": False, "default": "round_robin"},
                     {"name": "enable_prefix", "label": "启用前缀", "required": False, "default": True},
                     {"name": "site_password", "label": "站点密码(x-custom-auth)", "required": False, "secret": True},
                 ]
             },
             {
                 "value": "duck_mail",
-                "label": "DuckMail",
-                "description": "DuckMail 接口邮箱服务，支持 API Key 私有域名访问",
+                "label": "Duck 邮箱",
+                "description": "DuckMail.sbs 与 DuckDuckMail 子类型邮箱服务",
                 "config_fields": [
-                    {"name": "base_url", "label": "API 地址", "required": True, "placeholder": "https://api.duckmail.sbs"},
-                    {"name": "default_domain", "label": "默认域名", "required": True, "placeholder": "duckmail.sbs"},
+                    {"name": "base_url", "label": "API 地址", "required": True, "placeholder": "https://quack.duckduckgo.com"},
+                    {"name": "default_domain", "label": "邮箱域名（建议一行一个，兼容逗号）", "required": True, "placeholder": "a.com\\nb.com"},
+                    {"name": "domain_strategy", "label": "域名选择策略", "required": False, "default": "round_robin"},
                     {"name": "api_key", "label": "API Key", "required": False, "secret": True},
                     {"name": "password_length", "label": "随机密码长度", "required": False, "default": 12},
                 ]
@@ -226,11 +333,14 @@ async def get_service_types():
             {
                 "value": "cloud_mail",
                 "label": "CloudMail",
-                "description": "CloudMail API 邮箱服务，支持 Token 访问",
+                "description": "CloudMail API 邮箱服务，支持管理员密码换取 Token",
                 "config_fields": [
                     {"name": "base_url", "label": "API 地址", "required": True, "placeholder": "https://mail.example.com"},
+                    {"name": "admin_email", "label": "管理员邮箱", "required": False},
+                    {"name": "admin_password", "label": "管理员密码", "required": False, "secret": True},
                     {"name": "api_token", "label": "API Token", "required": True, "secret": True},
-                    {"name": "domain", "label": "邮箱域名", "required": True, "placeholder": "example.com"},
+                    {"name": "domain", "label": "邮箱域名（建议一行一个，兼容逗号）", "required": True, "placeholder": "a.com\\nb.com"},
+                    {"name": "domain_strategy", "label": "域名选择策略", "required": False, "default": "round_robin"},
                     {"name": "auth_header", "label": "鉴权 Header", "required": False, "default": "Authorization"},
                     {"name": "auth_prefix", "label": "鉴权前缀", "required": False, "default": ""},
                 ]
@@ -260,6 +370,73 @@ async def list_email_services(
             total=len(services),
             services=[service_to_response(s) for s in services]
         )
+
+
+@router.post("/cloudmail/gen-token", response_model=CloudMailGenTokenResponse)
+async def cloudmail_gen_token(request: CloudMailGenTokenRequest):
+    """通过 CloudMail 管理员邮箱密码生成 API Token。"""
+    from curl_cffi import requests as cffi_requests
+
+    base_url = str(request.base_url or "").strip().rstrip("/")
+    admin_email = str(request.admin_email or "").strip()
+    admin_password = str(request.admin_password or "").strip()
+
+    if not base_url:
+        raise HTTPException(status_code=400, detail="CloudMail API 地址不能为空")
+    if not base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="CloudMail API 地址必须以 http:// 或 https:// 开头")
+    if not admin_email:
+        raise HTTPException(status_code=400, detail="管理员邮箱不能为空")
+    if not admin_password:
+        raise HTTPException(status_code=400, detail="管理员密码不能为空")
+
+    endpoint = f"{base_url}/api/public/genToken"
+    payload = {
+        "email": admin_email,
+        "password": admin_password,
+    }
+
+    try:
+        resp = cffi_requests.post(
+            endpoint,
+            json=payload,
+            timeout=20,
+            impersonate="chrome110",
+        )
+    except Exception as e:
+        logger.error(f"CloudMail 生成 Token 请求失败: {e}")
+        raise HTTPException(status_code=502, detail=f"请求 CloudMail 失败: {e}")
+
+    try:
+        body = resp.json() if resp.text else {}
+    except Exception:
+        body = {}
+
+    token = ""
+    if isinstance(body, dict):
+        data = body.get("data")
+        if isinstance(data, dict):
+            token = str(data.get("token") or data.get("api_token") or "").strip()
+        if not token:
+            token = str(body.get("token") or body.get("api_token") or "").strip()
+
+    code = body.get("code") if isinstance(body, dict) else None
+    code_ok = code in (None, 0, 200, "0", "200")
+
+    if resp.status_code != 200 or not code_ok or not token:
+        detail_msg = ""
+        if isinstance(body, dict):
+            detail_msg = str(
+                body.get("message")
+                or body.get("msg")
+                or body.get("error")
+                or ""
+            ).strip()
+        if not detail_msg:
+            detail_msg = f"HTTP {resp.status_code}"
+        raise HTTPException(status_code=400, detail=f"CloudMail 生成 Token 失败: {detail_msg}")
+
+    return CloudMailGenTokenResponse(success=True, token=token)
 
 
 @router.get("/{service_id}", response_model=EmailServiceResponse)
@@ -378,27 +555,46 @@ async def test_email_service(service_id: int):
 
         try:
             service_type = EmailServiceType(service.service_type)
-            email_service = EmailServiceFactory.create(service_type, service.config, name=service.name)
+            service_config = dict(service.config or {})
+            if service_type == EmailServiceType.DUCK_MAIL:
+                service_config = _resolve_duck_receiver_for_test(db, service_config)
+            email_service = EmailServiceFactory.create(service_type, service_config, name=service.name)
 
             health = email_service.check_health()
+            details = _build_service_test_details(email_service)
 
             if health:
                 return ServiceTestResult(
                     success=True,
                     message="服务连接正常",
-                    details=email_service.get_service_info() if hasattr(email_service, 'get_service_info') else None
+                    details=details or None
                 )
             else:
+                last_error = str((details or {}).get("last_error") or "").strip()
+                if last_error:
+                    message = f"服务连接失败: {last_error}"
+                else:
+                    mode = str((details or {}).get("mode") or "").strip()
+                    mode_hint = f"/{mode}" if mode else ""
+                    message = f"服务连接失败（{service.service_type}{mode_hint}）"
                 return ServiceTestResult(
                     success=False,
-                    message="服务连接失败"
+                    message=message,
+                    details=details or None
                 )
 
+        except HTTPException as e:
+            detail = _extract_http_exception_detail(e)
+            message = f"测试失败: {detail}" if detail else f"测试失败: HTTP {getattr(e, 'status_code', 400)}"
+            return ServiceTestResult(success=False, message=message)
         except Exception as e:
             logger.error(f"测试邮箱服务失败: {e}")
+            err_text = str(e).strip()
+            if not err_text:
+                err_text = f"{e.__class__.__name__}: {repr(e)}"
             return ServiceTestResult(
                 success=False,
-                message=f"测试失败: {str(e)}"
+                message=f"测试失败: {err_text}"
             )
 
 

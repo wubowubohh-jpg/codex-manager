@@ -19,13 +19,14 @@ AI 站长交流群：https://t.me/vpsbbq
   - 🔄 **原汁原味的跳转链路：** 100% 还原官方真实访问流，从访问 `chatgpt.com` 首页获取初始 CSRF，无缝转交 `signin/openai`，再跟随跳转到 `auth.openai.com` 授权。全自动化的跳转控制使成功率飙升。
 
 - **多邮箱服务支持**
-  - Tempmail.lol（临时邮箱，无需配置）
-  - Generator.email（临时邮箱，无需配置）
+  - ⚠️ 新版暂不支持临时邮箱渠道（Tempmail.lol / Generator.email）
+  - ✅ 推荐使用 **CloudMail**（稳定性优先）
   - Outlook（IMAP + XOAUTH2，支持批量导入）
   - 自定义邮箱服务（四种子类型）
     - **MoeMail**：标准 REST API，配置 API 地址 + API 密钥
     - **TempMail**：自部署 Cloudflare Worker 临时邮箱，配置 Worker 地址 + Admin 密码
     - **DuckMail**：兼容 DuckMail API，配置 API 地址 + 默认域名，可选 API Key
+    - **DuckDuckMail（duck.com）**：支持 Duck 官方别名邮箱（`@duck.com`），可配置 Token/Cookie，并支持转发到指定收件后端自动取码
     - **CloudMail**：CloudMail API，配置 API 地址 + Token + 邮箱域名
   - 支持**多选邮箱服务轮询**，自动在所选服务间分配请求，降低单服务 429 风险
 
@@ -142,7 +143,8 @@ uv run webui.py --access-password mypassword
 uv run webui.py --host 0.0.0.0 --port 8080 --access-password mypassword
 ```
 
-> ⚠️ 运行限制：**不支持无头模式**，请在有桌面环境的机器上运行（Windows/Linux GUI 均可）。
+> ✅ 部署建议：优先使用 Docker + HTTP OAuth（云端推荐）。
+> 若启用浏览器兜底模式，则仍建议在有桌面环境的机器运行。
 >
 > 默认不会生成页面调试快照（`.json/.html/.png`）。仅当显式设置
 > `BROWSER_SAVE_PAGE_ELEMENTS=1` 时才会保存。
@@ -164,7 +166,7 @@ uv run webui.py --host 0.0.0.0 --port 8080 --access-password mypassword
 > Token 获取方式建议：
 > - **推荐** `BROWSER_OAUTH_HTTP_ONLY=1`（仅 HTTP OAuth）
 > - 需要兜底可用 `BROWSER_OAUTH_HTTP_FIRST=1`（HTTP 优先，失败回退浏览器）
-> - 两项都不设时为 Playwright 全流程
+> - 两项都不设时默认为仅 HTTP OAuth（前端默认也为仅 HTTP）
 
 ### 守护进程模式（源码/单机推荐）
 
@@ -331,16 +333,18 @@ codex-manager/
 
 ## 部署方式说明
 
-⚠️ **不建议/不支持 Docker 部署。**
+✅ **推荐 Docker 部署。**
 
-当前版本仅建议使用本地桌面环境运行：
+推荐直接使用 `docker-compose` 启动（生产环境建议）：
 
 ```bash
-uv run webui.py
+docker compose up -d --build
 ```
 
-- 不支持无头模式
-- 推荐在有桌面环境的机器运行（本机/远程桌面均可）
+- 默认端口：`8096`
+- 数据持久化：`./data`、`./logs`
+- 推荐使用仅 HTTP OAuth 模式运行（云端容器更稳定）
+- 若要启用浏览器兜底链路，建议使用具备桌面环境的宿主机
 
 ## 注意事项
 

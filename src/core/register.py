@@ -16,10 +16,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
+from zoneinfo import ZoneInfo
 
 from ..services.base import BaseEmailService
 
 logger = logging.getLogger(__name__)
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _extract_account_id_from_jwt(token: str) -> str:
@@ -128,13 +130,13 @@ class RegistrationEngine:
         proxy_url: Optional[str] = None,
         callback_logger: Optional[Callable[[str], None]] = None,
         task_uuid: Optional[str] = None,
-        token_mode: str = "browser",
+        token_mode: str = "browser_http_only",
     ):
         self.email_service = email_service
         self.proxy_url = proxy_url
         self.callback_logger = callback_logger
         self.task_uuid = task_uuid
-        self.token_mode = (token_mode or "browser").strip().lower()
+        self.token_mode = (token_mode or "browser_http_only").strip().lower()
 
         self.email: Optional[str] = None
         self.password: Optional[str] = None
@@ -149,7 +151,7 @@ class RegistrationEngine:
         self._log(self.LEGACY_REMOVED_MESSAGE, "warning")
 
     def _log(self, message: str, level: str = "info") -> None:
-        ts = datetime.now().strftime("%H:%M:%S")
+        ts = datetime.now(_SHANGHAI_TZ).strftime("%H:%M:%S")
         line = f"[{ts}] {message}"
         self.logs.append(line)
         if self.callback_logger:
@@ -183,7 +185,7 @@ class RegistrationEngine:
     def run(self) -> RegistrationResult:
         msg = (
             "旧注册引擎已禁用：请使用 BrowserRegistrationEngine。"
-            "（token_mode 仅支持 browser）"
+            "（token_mode 请使用 browser_http_only / browser_http_first / browser）"
         )
         self._log(msg, "error")
         return RegistrationResult(
@@ -194,9 +196,9 @@ class RegistrationEngine:
             error_message=msg,
             logs=list(self.logs),
             metadata={
-                "token_mode": "browser",
+                "token_mode": "browser_http_only",
                 "legacy_engine_removed": True,
-                "registered_at": datetime.now().isoformat(),
+                "registered_at": datetime.now(_SHANGHAI_TZ).isoformat(),
             },
             source="register",
         )

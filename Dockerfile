@@ -3,6 +3,9 @@ FROM python:3.10-slim
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo Asia/Shanghai > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -28,6 +31,7 @@ EXPOSE 8000
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Shanghai
 
 # Run the application
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]

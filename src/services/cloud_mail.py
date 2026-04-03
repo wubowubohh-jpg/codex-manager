@@ -9,9 +9,15 @@ import secrets
 import time
 import json
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
-from .base import BaseEmailService, EmailServiceError, EmailServiceType
+from .base import (
+    BaseEmailService,
+    EmailServiceError,
+    EmailServiceType,
+    parse_domain_list,
+    pick_domain,
+)
 from ..core.http_client import HTTPClient, RequestConfig
 from ..config.constants import OTP_CODE_PATTERN
 
@@ -32,6 +38,7 @@ class CloudMailService(BaseEmailService):
             "base_url": "",
             "api_token": "",
             "default_domain": "",
+            "domain_strategy": "round_robin",
             "timeout": 30,
             "max_retries": 3,
             "poll_interval": 3,
@@ -39,7 +46,9 @@ class CloudMailService(BaseEmailService):
             "otp_sent_time_skew_seconds": 12,
             "prefix": "oc",
             "token_bytes": 3,
-            "page_size": 5,
+            "page_size": 20,
+            "multi_query_enabled": True,
+            "subject_queries": ["OpenAI", "ChatGPT"],
             "auth_header": "Authorization",
             "auth_prefix": "",
             "proxy_url": None,
@@ -47,6 +56,7 @@ class CloudMailService(BaseEmailService):
 
         self.config = {**default_config, **(config or {})}
         self.config["base_url"] = str(self.config.get("base_url") or "").rstrip("/")
+        self.config["subject_queries"] = self._normalize_subject_queries(self.config.get("subject_queries"))
 
         missing_keys = []
         if not self.config.get("base_url"):
@@ -57,7 +67,7 @@ class CloudMailService(BaseEmailService):
         if missing_keys:
             raise ValueError(f"缺少必需配置: {missing_keys}")
 
-        if not self._resolve_domain(self.config):
+        if not self._resolve_domains(self.config):
             raise ValueError("缺少邮箱域名")
 
         http_config = RequestConfig(
@@ -89,13 +99,49 @@ class CloudMailService(BaseEmailService):
             return value
         return str(value or "").strip().lower() in ("1", "true", "yes", "on")
 
-    def _resolve_domain(self, config: Dict[str, Any]) -> str:
-        domain = (
-            config.get("default_domain")
-            or config.get("domain")
-            or ""
-        )
-        return str(domain).strip().lstrip("@")
+    @staticmethod
+    def _normalize_subject_queries(value: Any) -> List[str]:
+        if value is None:
+            return ["OpenAI", "ChatGPT"]
+        items: List[str] = []
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                text = str(item or "").strip()
+                if text:
+                    items.append(text)
+        else:
+            for item in re.split(r"[\r\n,，]+", str(value or "")):
+                text = str(item or "").strip()
+                if text:
+                    items.append(text)
+        if not items:
+            return ["OpenAI", "ChatGPT"]
+        dedup: List[str] = []
+        seen = set()
+        for item in items:
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            dedup.append(item)
+        return dedup
+
+    @staticmethod
+    def _short_text(value: Any, limit: int = 220) -> str:
+        text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(20, limit)] + "..."
+
+    def _resolve_domains(self, config: Dict[str, Any]) -> List[str]:
+        domains = parse_domain_list(config.get("domain"))
+        if domains:
+            return domains
+        return parse_domain_list(config.get("default_domain") or "")
+
+    def _build_domain_rr_key(self, domains: List[str]) -> str:
+        base_url = str(self.config.get("base_url") or "").strip().lower()
+        return f"cloud_mail|{self.name}|{base_url}|{','.join(domains)}"
 
     def _sanitize_local_part(self, local_part: str) -> str:
         safe = re.sub(r"[^a-zA-Z0-9._-]", "", local_part or "")
@@ -215,24 +261,27 @@ class CloudMailService(BaseEmailService):
                 if text:
                     parts.append(_strip_html(text) if ("<" in text and ">" in text) else text)
 
-        for key in (
-            "subject", "title", "text", "content", "html", "body",
+        direct_text_keys = (
+            "subject", "title", "mailSubject", "mailTitle",
+            "text", "content", "html", "body",
             "textContent", "contentText", "mailText", "mailContent",
-            "bodyText", "text_body", "mail_body",
-            "source", "raw"
-        ):
+            "bodyText", "text_body", "mail_body", "mailBody",
+            "preview", "snippet", "summary", "intro", "mailPreview",
+            "contentHtml", "htmlContent", "source", "raw",
+        )
+        for key in direct_text_keys:
             value = message.get(key)
             if isinstance(value, dict):
-                for nested_key in ("subject", "title", "text", "content", "html", "body", "mailText"):
+                for nested_key in direct_text_keys:
                     _append(value.get(nested_key))
             else:
                 _append(value)
 
         # 兼容嵌套结构
-        for nested_key in ("data", "mail", "email", "detail", "message"):
+        for nested_key in ("data", "mail", "email", "detail", "message", "payload", "item", "record"):
             nested = message.get(nested_key)
             if isinstance(nested, dict):
-                for key in ("subject", "title", "text", "content", "html", "body", "mailText"):
+                for key in direct_text_keys:
                     _append(nested.get(key))
 
         return " ".join(parts).strip()
@@ -252,27 +301,156 @@ class CloudMailService(BaseEmailService):
                     return str(value).strip()
         return ""
 
+    def _message_identity_key(self, message: Dict[str, Any]) -> str:
+        message_id = self._extract_message_id(message)
+        if message_id:
+            return f"id:{message_id}"
+        try:
+            serialized = json.dumps(message, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            serialized = str(message)
+        return f"blob:{serialized}"
+
+    def _query_email_list(self, url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> Tuple[int, List[Dict[str, Any]], str]:
+        response = self.http_client.post(url, headers=headers, json=payload)
+        if response.status_code != 200:
+            return int(response.status_code), [], self._short_text(response.text, 220)
+        data = response.json()
+        snippet = ""
+        if self._verbose_content_logging:
+            try:
+                snippet = json.dumps(data, ensure_ascii=False)[:500]
+            except Exception:
+                snippet = str(data)[:500]
+        messages = self._extract_messages(data)
+        return 200, messages, snippet
+
+    def _collect_messages_multi_query(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        base_payload: Dict[str, Any],
+    ) -> Tuple[List[Dict[str, Any]], int, int, str]:
+        dedup: Dict[str, Dict[str, Any]] = {}
+        non_200_count = 0
+        last_non_200_status = 0
+        payload_snippet = ""
+
+        query_payloads: List[Dict[str, Any]] = [dict(base_payload)]
+        if self._is_truthy(self.config.get("multi_query_enabled", True)):
+            for subject in self._normalize_subject_queries(self.config.get("subject_queries")):
+                payload = dict(base_payload)
+                payload["subject"] = subject
+                query_payloads.append(payload)
+
+        for payload in query_payloads:
+            status_code, messages, snippet = self._query_email_list(url, headers, payload)
+            if status_code != 200:
+                non_200_count += 1
+                last_non_200_status = status_code
+                continue
+            if snippet and not payload_snippet:
+                payload_snippet = snippet
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                dedup[self._message_identity_key(message)] = message
+
+        return list(dedup.values()), non_200_count, last_non_200_status, payload_snippet
+
+    def _collect_text_values(self, value: Any, out: List[str]) -> None:
+        if value is None:
+            return
+        if isinstance(value, dict):
+            for v in value.values():
+                self._collect_text_values(v, out)
+            return
+        if isinstance(value, list):
+            for item in value:
+                self._collect_text_values(item, out)
+            return
+        text = str(value).strip()
+        if text:
+            out.append(text)
+
+    def _extract_recipient_blob(self, message: Dict[str, Any]) -> str:
+        """
+        提取邮件收件人相关字段，供“固定收件箱 + 别名过滤”模式判定。
+        """
+        parts: List[str] = []
+        keys = (
+            "toEmail", "to_email", "to", "recipient", "recipients",
+            "deliveredTo", "delivered_to", "xOriginalTo", "x_original_to",
+            "envelope", "headers", "header", "mailHeader", "mail_header",
+        )
+        for key in keys:
+            if key in message:
+                self._collect_text_values(message.get(key), parts)
+
+        nested = message.get("data")
+        if isinstance(nested, dict):
+            for key in keys:
+                if key in nested:
+                    self._collect_text_values(nested.get(key), parts)
+
+        # 兜底：把整条消息 JSON 也纳入检索，兼容字段名不固定的返回
+        try:
+            parts.append(json.dumps(message, ensure_ascii=False))
+        except Exception:
+            parts.append(str(message))
+
+        return " ".join(parts).strip().lower()
+
+    def _message_targets_alias(self, message: Dict[str, Any], expected_alias: str) -> bool:
+        alias = str(expected_alias or "").strip().lower()
+        if not alias:
+            return True
+        blob = self._extract_recipient_blob(message)
+        return alias in blob
+
     def _extract_code_from_text(self, text: str, pattern: str) -> Optional[str]:
         """从文本中提取验证码，优先语义匹配。"""
         if not text:
             return None
         lowered = text.lower()
-        semantic_pattern = r"(?:code\\s+is|verification code|temporary verification code|one-time code|验证码)\\s*[:：]?\\s*(\\d{6})"
-        if "openai" in lowered or "chatgpt" in lowered or "verification code" in lowered or "验证码" in text:
-            match = re.search(semantic_pattern, text, re.I)
+        semantic_patterns = (
+            r"(?is)(?:verification\s+code|temporary verification code|one[-\s]*time\s+(?:password|code)|security\s+code|login\s+code|验证码|校验码|动态码|認證碼|驗證碼|代码|code)[^0-9]{0,30}(\d{6})",
+            r"(?is)\bcode\b[^0-9]{0,12}(\d{6})",
+        )
+        for regex in semantic_patterns:
+            match = re.search(regex, text, re.I)
             if match:
-                return match.group(1)
+                return match.group(1) if match.groups() else match.group(0)
 
+        # 对大段 JSON 文本做兜底时，避免误命中随机 6 位数字
+        context_hint = (
+            "openai" in lowered
+            or "chatgpt" in lowered
+            or "verification" in lowered
+            or "验证码" in text
+            or "校验码" in text
+            or "代码" in text
+        )
         match = re.search(pattern, text)
-        return match.group(1) if match else None
+        if not match:
+            return None
+        code = match.group(1) if match.groups() else match.group(0)
+        if len(text) <= 1200 or context_hint:
+            return code
+        return None
 
     def create_email(self, config: Dict[str, Any] = None) -> Dict[str, Any]:
         """生成 CloudMail 邮箱地址（无需远端创建）。"""
         try:
             request_config = {**self.config, **(config or {})}
-            domain = self._resolve_domain(request_config)
-            if not domain:
+            domains = self._resolve_domains(request_config)
+            if not domains:
                 raise EmailServiceError("CloudMail 缺少邮箱域名")
+            domain = pick_domain(
+                domains,
+                strategy=request_config.get("domain_strategy"),
+                rr_key=self._build_domain_rr_key(domains),
+            )
 
             local_part = (
                 request_config.get("local_part")
@@ -317,8 +495,26 @@ class CloudMailService(BaseEmailService):
 
         url = f"{self.config['base_url']}/api/public/emailList"
         headers = self._build_headers()
+        inbox_email = str(
+            self.config.get("inbox_email")
+            or self.config.get("receiver_email")
+            or email
+            or ""
+        ).strip()
+        expected_alias = str(
+            self.config.get("receiver_alias_email")
+            or email
+            or ""
+        ).strip().lower()
+        alias_filter_enabled = self._is_truthy(self.config.get("receiver_alias_filter", True))
+        use_alias_filter = bool(
+            alias_filter_enabled
+            and inbox_email
+            and expected_alias
+            and inbox_email.lower() != expected_alias
+        )
         payload = {
-            "toEmail": email,
+            "toEmail": inbox_email,
             "timeSort": "desc",
             "num": 1,
             "size": int(self.config.get("page_size") or 5),
@@ -331,26 +527,40 @@ class CloudMailService(BaseEmailService):
             for code in (exclude_codes or [])
             if str(code or "").strip()
         }
+        strict_time_filter = bool(excluded)
+        time_filter_relaxed = False
+        # 每次取码调用都重置一次调试开关，避免多任务时后续调用失去诊断日志
+        self._debug_dumped = False
+        self._debug_no_code_dumped = False
+        self._debug_time_filter_dumped = False
+        saw_messages = False
+        last_payload_snippet = ""
+        non_200_count = 0
+        last_non_200_status = 0
 
         while time.time() - start_time < timeout:
             try:
-                response = self.http_client.post(url, headers=headers, json=payload)
-                if response.status_code != 200:
-                    logger.debug(f"CloudMail 响应异常: {response.status_code} {response.text[:200]}")
-                    time.sleep(poll_interval)
-                    continue
+                messages, round_non_200_count, round_last_non_200_status, payload_snippet = (
+                    self._collect_messages_multi_query(url, headers, payload)
+                )
+                non_200_count += round_non_200_count
+                if round_last_non_200_status:
+                    last_non_200_status = round_last_non_200_status
+                if payload_snippet:
+                    last_payload_snippet = payload_snippet
 
-                data = response.json()
-                messages = self._extract_messages(data)
+                if round_non_200_count > 0 and (non_200_count == 1 or non_200_count % 10 == 0):
+                    logger.warning(
+                        "CloudMail emailList 响应非 200: status=%s, body=%s",
+                        round_last_non_200_status or "-",
+                        "multi-query partial failure",
+                    )
                 if not messages:
                     if not getattr(self, "_debug_dumped", False):
                         if self._quiet_warnings:
                             logger.debug("CloudMail 未解析到邮件列表（quiet 模式已静默）")
                         elif self._verbose_content_logging:
-                            try:
-                                snippet = json.dumps(data, ensure_ascii=False)[:500]
-                            except Exception:
-                                snippet = str(data)[:500]
+                            snippet = payload_snippet or last_payload_snippet or "-"
                             logger.warning(f"CloudMail 未解析到邮件列表，响应片段: {snippet}")
                         else:
                             logger.warning("CloudMail 未解析到邮件列表（已隐藏响应片段）")
@@ -358,29 +568,46 @@ class CloudMailService(BaseEmailService):
                     time.sleep(poll_interval)
                     continue
 
+                saw_messages = True
                 found_code = None
                 last_message_id = self._last_message_id_cache.get(email, "")
                 last_code = self._last_code_cache.get(email, "")
                 skew_seconds = int(self.config.get("otp_sent_time_skew_seconds") or 12)
                 skew_seconds = max(0, min(skew_seconds, 60))
                 cutoff_ts = (otp_sent_at - skew_seconds) if otp_sent_at else None
+                if cutoff_ts is not None and not time_filter_relaxed:
+                    # 在云端环境中，CloudMail 服务器时间与运行节点可能存在时钟偏差；
+                    # 若较长时间未命中验证码，则放宽时间窗，避免误判超时。
+                    relax_after = max(20.0, min(float(timeout) * 0.4, 45.0))
+                    if (time.time() - start_time) >= relax_after:
+                        time_filter_relaxed = True
+                        logger.warning("CloudMail 长时间未命中验证码，已放宽时间窗口过滤")
+
+                effective_cutoff_ts = None if time_filter_relaxed else cutoff_ts
                 candidates: List[Dict[str, Any]] = []
+                skipped_by_time = 0
                 for message in messages:
                     if not isinstance(message, dict):
                         continue
                     msg_id = self._extract_message_id(message)
                     msg_time = self._extract_message_timestamp(message)
-                    if cutoff_ts is not None:
-                        if msg_time is None:
-                            # 在 OAuth 二次登录阶段必须严格按时间窗口取码，避免吞旧码
-                            continue
-                        if msg_time < cutoff_ts:
-                            continue
+                    if use_alias_filter and not self._message_targets_alias(message, expected_alias):
+                        continue
+                    # 仅在“二次验证码排重阶段”启用严格时间窗，首轮验证码不做硬过滤，
+                    # 避免云端与邮箱服务时钟偏差导致把第一封验证码误判为旧邮件。
+                    if (
+                        strict_time_filter
+                        and effective_cutoff_ts is not None
+                        and msg_time is not None
+                        and msg_time < effective_cutoff_ts
+                    ):
+                        skipped_by_time += 1
+                        continue
 
                     content = self._extract_message_text(message)
                     code = self._extract_code_from_text(content, pattern)
-                    if not code and not content:
-                        # 兜底：在原始消息 JSON 中尝试语义提取
+                    if not code:
+                        # 兜底：无论正文是否为空，都在原始消息 JSON 中做一次提码，兼容异构字段名
                         raw_blob = json.dumps(message, ensure_ascii=False)
                         code = self._extract_code_from_text(raw_blob, pattern)
 
@@ -401,7 +628,9 @@ class CloudMailService(BaseEmailService):
                         code = str(candidate.get("code") or "")
                         msg_id = str(candidate.get("msg_id") or "")
                         if msg_id and last_message_id and msg_id == last_message_id:
-                            continue
+                            # 兼容部分平台复用同一个 message_id 但更新验证码内容
+                            if last_code and code == last_code:
+                                continue
                         if not msg_id and last_code and code == last_code:
                             continue
                         self._last_code_cache[email] = code
@@ -415,6 +644,15 @@ class CloudMailService(BaseEmailService):
                 if found_code:
                     return found_code
 
+                if skipped_by_time > 0 and strict_time_filter and not getattr(self, "_debug_time_filter_dumped", False):
+                    logger.warning(
+                        "CloudMail 时间窗过滤跳过 %s 封邮件（strict=%s, relaxed=%s）",
+                        skipped_by_time,
+                        strict_time_filter,
+                        time_filter_relaxed,
+                    )
+                    self._debug_time_filter_dumped = True
+
                 if messages and not getattr(self, "_debug_no_code_dumped", False):
                     if self._quiet_warnings:
                         logger.debug("CloudMail 已获取邮件但未匹配验证码（quiet 模式已静默）")
@@ -424,7 +662,10 @@ class CloudMailService(BaseEmailService):
                             snippet = json.dumps(sample, ensure_ascii=False)[:400]
                         except Exception:
                             snippet = str(sample)[:400]
-                        logger.warning(f"CloudMail 已获取邮件但未匹配验证码，示例片段: {snippet}")
+                        key_hint = ", ".join(sorted(sample.keys())[:20]) if isinstance(sample, dict) else "-"
+                        logger.warning(
+                            f"CloudMail 已获取邮件但未匹配验证码，示例字段: {key_hint}，示例片段: {snippet}"
+                        )
                     else:
                         logger.warning("CloudMail 已获取邮件但未匹配验证码（已隐藏示例片段）")
                     self._debug_no_code_dumped = True
@@ -434,7 +675,19 @@ class CloudMailService(BaseEmailService):
 
             time.sleep(poll_interval)
 
-        logger.warning(f"CloudMail 等待验证码超时: {email}")
+        if self._quiet_warnings:
+            logger.warning(f"CloudMail 等待验证码超时: {email}")
+        else:
+            logger.warning(
+                "CloudMail 等待验证码超时: %s (saw_messages=%s, excluded_count=%s, time_filter_relaxed=%s, non_200_count=%s, last_non_200=%s, payload=%s)",
+                email,
+                saw_messages,
+                len(excluded),
+                time_filter_relaxed,
+                non_200_count,
+                last_non_200_status or "-",
+                (last_payload_snippet or "-"),
+            )
         return None
 
     def list_emails(self, **kwargs) -> List[Dict[str, Any]]:
@@ -456,7 +709,8 @@ class CloudMailService(BaseEmailService):
     def check_health(self) -> bool:
         """检查 CloudMail 服务可用性。"""
         try:
-            domain = self._resolve_domain(self.config)
+            domains = self._resolve_domains(self.config)
+            domain = domains[0] if domains else ""
             test_email = f"healthcheck@{domain}" if domain else "healthcheck@example.com"
             url = f"{self.config['base_url']}/api/public/emailList"
             payload = {

@@ -11,6 +11,14 @@ services:
       - ./logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=${TZ:-Asia/Shanghai}
+      # 0=仅写文件日志，不输出到 Docker 控制台；1=同时输出控制台
+      - APP_LOG_TO_STDOUT=${APP_LOG_TO_STDOUT:-0}
+      # 数据库连接池（并发任务高时建议适当调大）
+      - APP_DB_POOL_SIZE=${APP_DB_POOL_SIZE:-20}
+      - APP_DB_MAX_OVERFLOW=${APP_DB_MAX_OVERFLOW:-40}
+      - APP_DB_POOL_TIMEOUT=${APP_DB_POOL_TIMEOUT:-5}
+      - APP_DB_POOL_RECYCLE=${APP_DB_POOL_RECYCLE:-1800}
       # Web UI 配置（也可在 .env 文件中设置）
       - APP_HOST=0.0.0.0
       - APP_PORT=8000

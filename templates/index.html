@@ -7,10 +7,16 @@
     <link rel="stylesheet" href="/static/css/style.css?v={{ static_version }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
     <style>
+        /* 注册页容器放宽，减少两侧留白 */
+        .container {
+            max-width: min(1720px, 97vw);
+            padding: 0 var(--spacing-md);
+        }
+
         /* 两栏布局 */
         .two-column-layout {
             display: grid;
-            grid-template-columns: 30% 70%;
+            grid-template-columns: minmax(760px, 1.6fr) minmax(460px, 1.15fr);
             gap: var(--spacing-lg);
             align-items: start;
         }
@@ -18,6 +24,9 @@
         .left-panel {
             position: sticky;
             top: calc(60px + var(--spacing-lg));
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-lg);
         }
 
         .right-panel {
@@ -26,10 +35,29 @@
             gap: var(--spacing-lg);
         }
 
+        .form-actions.form-actions-inline {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--spacing-sm);
+        }
+
+        .action-button-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: var(--spacing-sm);
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .action-button-grid .btn,
+        .form-actions.form-actions-inline .btn {
+            width: 100%;
+        }
+
         /* 任务状态行 */
         .task-status-row {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: 1fr;
             gap: var(--spacing-sm);
             padding: var(--spacing-md);
             background: var(--surface-hover);
@@ -38,7 +66,14 @@
         }
 
         .task-status-item {
-            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--spacing-sm);
+            text-align: left;
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
         }
 
         .task-status-item .label {
@@ -161,6 +196,86 @@
             gap: 6px;
             flex-wrap: wrap;
         }
+
+        .scheduler-master-toggle {
+            margin-top: 8px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--primary-light), transparent 58%);
+            transition: all var(--transition);
+        }
+
+        .scheduler-master-toggle.enabled {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-light);
+        }
+
+        .scheduler-master-toggle-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .scheduler-master-toggle-main {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .scheduler-master-toggle-main input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin: 0;
+            accent-color: var(--primary-color);
+            flex-shrink: 0;
+        }
+
+        .scheduler-master-toggle-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+        }
+
+        .scheduler-master-toggle-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+
+        .scheduler-master-toggle-desc {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            line-height: 1.3;
+        }
+
+        .scheduler-master-toggle-state {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            white-space: nowrap;
+            border: 1px solid transparent;
+        }
+
+        .scheduler-master-toggle-state.off {
+            color: var(--danger-color);
+            background: var(--danger-light);
+            border-color: rgba(239, 68, 68, 0.24);
+        }
+
+        .scheduler-master-toggle-state.on {
+            color: var(--success-color);
+            background: var(--success-light);
+            border-color: rgba(34, 197, 94, 0.24);
+        }
+
         @media (max-width: 480px) {
             .scheduler-header {
                 flex-direction: column;
@@ -172,6 +287,10 @@
             .scheduler-actions .btn {
                 width: 100%;
                 font-size: 0.7rem;
+            }
+            .scheduler-master-toggle-label {
+                flex-direction: column;
+                align-items: flex-start;
             }
         }
     </style>
@@ -269,11 +388,11 @@
                                 <div class="form-group" id="token-mode-group">
                                     <label for="token-mode">Token 获取方式</label>
                                     <select id="token-mode" name="token_mode">
-                                        <option value="browser" selected>Playwright 全流程（默认）</option>
+                                        <option value="browser_http_only" selected>仅 HTTP OAuth（全程 HTTP，失败不回退，推荐）</option>
                                         <option value="browser_http_first">HTTP OAuth 优先（全程 HTTP，失败回退浏览器）</option>
-                                        <option value="browser_http_only">仅 HTTP OAuth（全程 HTTP，失败不回退）</option>
+                                        <option value="browser">Playwright 全流程</option>
                                     </select>
-                                    <small style="color: var(--text-muted); font-size: 0.75rem;">推荐默认 Playwright；HTTP 模式用于全程 HTTP 注册/OAuth。</small>
+                                    <small style="color: var(--text-muted); font-size: 0.75rem;">默认推荐仅 HTTP OAuth；如需兜底可改为 HTTP 优先或 Playwright。</small>
                                 </div>
 
                                 <div class="form-group" id="batch-count-group" style="display: none;">
@@ -340,90 +459,93 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group" id="scheduler-group" style="padding-top: var(--spacing-sm); border-top: 1px solid var(--border-light); margin-top: var(--spacing-sm);">
-                                    <div class="scheduler-header">
-                                        <label style="font-weight: 500; margin-bottom: 0;">自动监控与注册 (定时 CPA) <span id="cpa-scheduler-status-badge" style="font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; margin-left: 6px;"></span></label>
-                                        <div class="scheduler-actions">
-                                            <button type="button" class="btn btn-ghost btn-sm" id="cpa-force-remove-401-btn" style="padding: 2px 8px; font-size: 0.75rem;">⚡ 快速剔除401/403/usage_limit_reached</button>
-                                            <button type="button" class="btn btn-ghost btn-sm" id="cpa-force-check-btn" style="padding: 2px 8px; font-size: 0.75rem;">⚡ 强制体检</button>
-                                        </div>
-                                    </div>
-                                    <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 6px;">
-                                        <input type="checkbox" id="cpa-auto-check-enabled">
-                                        <span>启用异常凭证测试并自动剔除</span>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 6px; padding-left: 24px;">
-                                        <span style="font-size: 0.8rem; color: var(--text-muted);">检测方式</span>
-                                        <select id="cpa-check-mode" style="padding: 4px 8px; font-size: 0.8rem;">
-                                            <option value="probe">直连穿透测活（容易死号）</option>
-                                            <option value="panel" selected>面板报错剔除（默认，不测活）</option>
-                                        </select>
-                                    </label>
-                                    <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 6px; padding-left: 24px;">
-                                        <input type="checkbox" id="cpa-auto-remove-401">
-                                        <span>直接剔除面板明确报错的凭证（401、403、usage_limit_reached）</span>
-                                    </label>
-                                    <div style="margin-top: 6px; padding-left: 48px; display: grid; grid-template-columns: 1fr; gap: 8px;">
-                                        <div class="form-group">
-                                            <label for="cpa-check-401-interval" style="font-size: 0.8rem; color: var(--text-muted);">401/403/usage_limit_reached 快速剔除间隔 (分钟)</label>
-                                            <input type="number" id="cpa-check-401-interval" min="1" max="1440" value="3" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                    </div>
-                                    <div style="margin-top: 6px; padding-left: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                                        <div class="form-group">
-                                            <label for="cpa-test-url" style="font-size: 0.8rem; color: var(--text-muted);">自定义测试 API</label>
-                                            <input type="text" id="cpa-test-url" placeholder="默认 wham/usage" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cpa-test-model" style="font-size: 0.8rem; color: var(--text-muted);">自定义测试模型</label>
-                                            <input type="text" id="cpa-test-model" placeholder="默认 gpt-5.2-codex" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                    </div>
-                                    <div style="margin-top: 6px; padding-left: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                                        <div class="form-group">
-                                            <label for="cpa-check-interval" style="font-size: 0.8rem; color: var(--text-muted);">定时运行间隔 (分钟)</label>
-                                            <input type="number" id="cpa-check-interval" min="1" max="1440" value="60" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cpa-check-sleep" style="font-size: 0.8rem; color: var(--text-muted);">每次测活间隔 (秒)</label>
-                                            <input type="number" id="cpa-check-sleep" min="0" max="60" value="1" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                    </div>
-                                    <div style="margin-top: 6px; padding-left: 24px; display: grid; grid-template-columns: 1fr; gap: 8px;">
-                                        <div class="form-group">
-                                            <label for="cpa-check-min-remaining-weekly-percent" style="font-size: 0.8rem; color: var(--text-muted);">周限额剩余低于此百分比时剔除（0 表示关闭）</label>
-                                            <input type="number" id="cpa-check-min-remaining-weekly-percent" min="0" max="100" value="20" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                    </div>
-                                    <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 12px;">
-                                        <input type="checkbox" id="cpa-auto-register-enabled">
-                                        <span>CPA 凭证不足时自动开启注册</span>
-                                    </label>
-                                    <div style="margin-top: 6px; padding-left: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                                        <div class="form-group">
-                                            <label for="cpa-register-threshold" style="font-size: 0.8rem; color: var(--text-muted);">少于此阈值即触发</label>
-                                            <input type="number" id="cpa-register-threshold" min="1" max="1000" value="10" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="cpa-register-batch-count" style="font-size: 0.8rem; color: var(--text-muted);">每次自动补充数量</label>
-                                            <input type="number" id="cpa-register-batch-count" min="1" value="5" style="padding: 4px 8px; font-size: 0.8rem;">
-                                        </div>
-                                    </div>
-                                    <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px; width: 100%;">
-                                        <button type="button" class="btn btn-secondary btn-lg" id="cpa-save-config-btn" style="width: 100%;">💾 保存并应用配置</button>
-                                        <button type="button" class="btn btn-danger btn-lg" id="cpa-stop-task-btn" style="width: 100%;">⛔ 停止自动任务</button>
-                                    </div>
-                                </div>
-
-                                <div class="form-actions" style="flex-direction: column;">
+                                <div class="form-actions form-actions-inline">
                                     <button type="submit" class="btn btn-primary btn-lg" id="start-btn" style="width: 100%;">
                                         🚀 开始注册
                                     </button>
-                                    <button type="button" class="btn btn-secondary" id="cancel-btn" disabled style="width: 100%;">
-                                        取消任务
+                                    <button type="button" class="btn btn-secondary btn-lg" id="cancel-btn" disabled style="width: 100%;">
+                                        停止注册
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>🛡️ 凭证管理策略</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group" id="scheduler-group">
+                                <div class="scheduler-header">
+                                    <label style="font-weight: 500; margin-bottom: 0;">自动监控与注册 (定时 CPA) <span id="cpa-scheduler-status-badge" style="font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; margin-left: 6px;"></span></label>
+                                    <div class="scheduler-actions">
+                                        <button type="button" class="btn btn-ghost btn-sm" id="cpa-force-check-btn" style="padding: 2px 8px; font-size: 0.75rem;">⚡ 强制体检</button>
+                                    </div>
+                                </div>
+                                <div id="cpa-master-toggle-wrap" class="scheduler-master-toggle">
+                                    <label for="cpa-auto-check-enabled" class="scheduler-master-toggle-label">
+                                        <span class="scheduler-master-toggle-main">
+                                            <input type="checkbox" id="cpa-auto-check-enabled">
+                                            <span class="scheduler-master-toggle-text">
+                                                <span class="scheduler-master-toggle-title">启用定时策略任务</span>
+                                                <span class="scheduler-master-toggle-desc">控制失效检查 + 限额检查（策略规则仅在开启时执行）</span>
+                                            </span>
+                                        </span>
+                                        <span id="cpa-check-master-status" class="scheduler-master-toggle-state off">已关闭</span>
+                                    </label>
+                                </div>
+                                <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 6px; padding-left: 24px;">
+                                    <span style="font-size: 0.8rem; color: var(--text-muted);">检测方式</span>
+                                    <select id="cpa-check-mode" style="padding: 4px 8px; font-size: 0.8rem;">
+                                        <option value="probe">探测模式（逐个发请求判断）</option>
+                                        <option value="panel" selected>面板模式（先用面板状态判定）</option>
+                                    </select>
+                                </label>
+                                <div style="margin-top: 6px; padding-left: 24px; display: grid; grid-template-columns: 1fr; gap: 8px;">
+                                    <div class="form-group">
+                                        <label for="cpa-check-interval" style="font-size: 0.8rem; color: var(--text-muted);">总定时运行间隔 (分钟)</label>
+                                        <input type="number" id="cpa-check-interval" min="1" max="1440" value="60" style="padding: 4px 8px; font-size: 0.8rem;">
+                                    </div>
+                                </div>
+
+                                <div class="scheduler-rule-panel" style="margin-top: 10px; padding: 10px; border: 1px solid var(--border-light); border-radius: 8px; background: rgba(255,255,255,0.02);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                        <label style="font-weight: 500; margin: 0;">策略规则（按顺序匹配）</label>
+                                        <button type="button" class="btn btn-ghost btn-sm" id="cpa-add-policy-rule-btn">+ 添加规则</button>
+                                    </div>
+                                    <small style="display: block; color: var(--text-muted); margin-bottom: 10px;">
+                                        支持按套餐、当前状态、阈值条件选择动作（剔除/禁用/启用）。
+                                    </small>
+                                    <div id="cpa-policy-rules-container" style="display: flex; flex-direction: column; gap: 10px;"></div>
+                                </div>
+
+                                <div style="margin-top: 8px; padding-left: 24px; display: grid; grid-template-columns: 1fr; gap: 8px;">
+                                    <div class="form-group">
+                                        <label for="cpa-check-min-remaining-weekly-percent" style="font-size: 0.8rem; color: var(--text-muted);">旧版兼容阈值（仅当未配置策略规则时生效）</label>
+                                        <input type="number" id="cpa-check-min-remaining-weekly-percent" min="0" max="100" value="20" style="padding: 4px 8px; font-size: 0.8rem;">
+                                    </div>
+                                </div>
+                                <label style="display: flex; align-items: center; gap: var(--spacing-sm); cursor: pointer; margin-top: 12px;">
+                                    <input type="checkbox" id="cpa-auto-register-enabled">
+                                    <span>CPA 凭证不足时自动开启注册</span>
+                                </label>
+                                <div style="margin-top: 6px; padding-left: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                    <div class="form-group">
+                                        <label for="cpa-register-threshold" style="font-size: 0.8rem; color: var(--text-muted);">少于此阈值即触发</label>
+                                        <input type="number" id="cpa-register-threshold" min="1" max="1000" value="10" style="padding: 4px 8px; font-size: 0.8rem;">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cpa-register-batch-count" style="font-size: 0.8rem; color: var(--text-muted);">每次自动补充数量</label>
+                                        <input type="number" id="cpa-register-batch-count" min="1" value="5" style="padding: 4px 8px; font-size: 0.8rem;">
+                                    </div>
+                                </div>
+
+                                <div class="action-button-grid">
+                                    <button type="button" class="btn btn-secondary btn-lg" id="cpa-save-config-btn">💾 保存并应用配置</button>
+                                    <button type="button" class="btn btn-danger btn-lg" id="cpa-stop-task-btn">⛔ 停止自动任务</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -505,10 +627,45 @@
                                     </thead>
                                     <tbody id="recent-accounts-table">
                                         <tr>
-                                            <td colspan="5">
+                                            <td colspan="4">
                                                 <div class="empty-state" style="padding: var(--spacing-md);">
                                                     <div class="empty-state-icon">📭</div>
                                                     <div class="empty-state-title">暂无已注册账号</div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 未授权账号列表 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>🔒 未授权账号</h3>
+                            <div style="display: flex; gap: var(--spacing-sm); align-items: center;">
+                                <span id="unauthorized-count" class="status-badge pending">0</span>
+                                <button class="btn btn-ghost btn-sm" id="refresh-unauthorized-btn">🔄 刷新</button>
+                                <button class="btn btn-danger btn-sm" id="clear-unauthorized-btn">🧹 一键清理</button>
+                            </div>
+                        </div>
+                        <div class="card-body" style="padding: 0;">
+                            <div class="recent-accounts-table">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 60px;">ID</th>
+                                            <th>邮箱</th>
+                                            <th style="width: 140px;">状态</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="unauthorized-accounts-table">
+                                        <tr>
+                                            <td colspan="3">
+                                                <div class="empty-state" style="padding: var(--spacing-md);">
+                                                    <div class="empty-state-icon">✅</div>
+                                                    <div class="empty-state-title">暂无未授权账号</div>
                                                 </div>
                                             </td>
                                         </tr>

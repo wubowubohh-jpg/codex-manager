@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from typing import Generator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.exc import SQLAlchemyError
 import os
 import logging
 
@@ -43,12 +42,35 @@ class DatabaseSessionManager:
                 database_url = f"sqlite:///{db_path}"
 
         self.database_url = _build_sqlalchemy_url(database_url)
-        self.engine = create_engine(
-            self.database_url,
-            connect_args={"check_same_thread": False} if self.database_url.startswith("sqlite") else {},
-            echo=False,  # 设置为 True 可以查看所有 SQL 语句
-            pool_pre_ping=True  # 连接池预检查
-        )
+        def _env_int(name: str, default: int, minimum: int) -> int:
+            raw = str(os.environ.get(name, "")).strip()
+            if not raw:
+                return default
+            try:
+                return max(minimum, int(raw))
+            except Exception:
+                return default
+
+        pool_size = _env_int("APP_DB_POOL_SIZE", 20, 1)
+        max_overflow = _env_int("APP_DB_MAX_OVERFLOW", 40, 0)
+        pool_timeout = _env_int("APP_DB_POOL_TIMEOUT", 5, 1)
+        pool_recycle = _env_int("APP_DB_POOL_RECYCLE", 1800, 30)
+
+        engine_kwargs = {
+            "echo": False,  # 设置为 True 可以查看所有 SQL 语句
+            "pool_pre_ping": True,  # 连接池预检查
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
+            "pool_timeout": pool_timeout,
+            "pool_recycle": pool_recycle,
+            "pool_use_lifo": True,
+        }
+
+        if self.database_url.startswith("sqlite"):
+            # timeout: SQLite 文件锁等待时间（秒）
+            engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+
+        self.engine = create_engine(self.database_url, **engine_kwargs)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
     def get_db(self) -> Generator[Session, None, None]:

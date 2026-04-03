@@ -134,15 +134,15 @@ SUPPORTED_TOKEN_MODES = {
 
 def _normalize_token_mode(mode: str) -> str:
     """规范化 token 获取方式。"""
-    value = (mode or "browser").strip().lower()
+    value = (mode or "browser_http_only").strip().lower()
     # 兼容旧值：http_independent -> browser_http_only
     if value == "http_independent":
         logger.warning("Token 获取方式 http_independent 已合并为 browser_http_only")
         return "browser_http_only"
     if value in SUPPORTED_TOKEN_MODES:
         return value
-    logger.warning(f"Token 获取方式 {value} 不受支持，回退为 browser")
-    return "browser"
+    logger.warning(f"Token 获取方式 {value} 不受支持，回退为 browser_http_only")
+    return "browser_http_only"
 
 
 def _get_shared_oauth_pre_delay_seconds() -> float:
@@ -181,7 +181,7 @@ class RegistrationTaskCreate(BaseModel):
     """创建注册任务请求"""
     email_service_type: str = "tempmail"
     email_service_pool: List[str] = []
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -198,7 +198,7 @@ class BatchRegistrationRequest(BaseModel):
     count: int = 1
     email_service_type: str = "tempmail"
     email_service_pool: List[str] = []
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
     proxy: Optional[str] = None
     email_service_config: Optional[dict] = None
     email_service_id: Optional[int] = None
@@ -269,7 +269,7 @@ class OutlookBatchRegistrationRequest(BaseModel):
     """Outlook 批量注册请求"""
     service_ids: List[int]
     skip_registered: bool = True
-    token_mode: str = "browser"
+    token_mode: str = "browser_http_only"
     proxy: Optional[str] = None
     interval_min: int = 5
     interval_max: int = 30
@@ -321,26 +321,89 @@ def _normalize_email_service_config(
 
     if 'api_url' in normalized and 'base_url' not in normalized:
         normalized['base_url'] = normalized.pop('api_url')
+    if 'domain_select_strategy' in normalized and 'domain_strategy' not in normalized:
+        normalized['domain_strategy'] = normalized.pop('domain_select_strategy')
 
     if service_type == EmailServiceType.CUSTOM_DOMAIN:
         if 'domain' in normalized and 'default_domain' not in normalized:
             normalized['default_domain'] = normalized.pop('domain')
+        strategy = str(normalized.get('domain_strategy') or '').strip().lower()
+        normalized['domain_strategy'] = strategy if strategy in ('round_robin', 'random') else 'round_robin'
     elif service_type == EmailServiceType.TEMP_MAIL:
         if 'default_domain' in normalized and 'domain' not in normalized:
             normalized['domain'] = normalized.pop('default_domain')
+        strategy = str(normalized.get('domain_strategy') or '').strip().lower()
+        normalized['domain_strategy'] = strategy if strategy in ('round_robin', 'random') else 'round_robin'
     elif service_type == EmailServiceType.DUCK_MAIL:
         if 'domain' in normalized and 'default_domain' not in normalized:
             normalized['default_domain'] = normalized.pop('domain')
+        strategy = str(normalized.get('domain_strategy') or '').strip().lower()
+        normalized['domain_strategy'] = strategy if strategy in ('round_robin', 'random') else 'round_robin'
+        if 'receiver_email' in normalized and 'receiver_inbox_email' not in normalized:
+            normalized['receiver_inbox_email'] = normalized.pop('receiver_email')
+        receiver_service_id = normalized.get('receiver_service_id')
+        if receiver_service_id is not None and str(receiver_service_id).strip() != "":
+            try:
+                normalized['receiver_service_id'] = int(receiver_service_id)
+            except Exception:
+                normalized.pop('receiver_service_id', None)
     elif service_type == EmailServiceType.CLOUD_MAIL:
         if 'domain' in normalized and 'default_domain' not in normalized:
             normalized['default_domain'] = normalized.pop('domain')
         if 'token' in normalized and 'api_token' not in normalized:
             normalized['api_token'] = normalized.pop('token')
+        strategy = str(normalized.get('domain_strategy') or '').strip().lower()
+        normalized['domain_strategy'] = strategy if strategy in ('round_robin', 'random') else 'round_robin'
 
     if proxy_url and 'proxy_url' not in normalized:
         normalized['proxy_url'] = proxy_url
 
     return normalized
+
+
+def _resolve_duck_receiver_service_config(db, duck_config: dict, proxy_url: Optional[str] = None) -> dict:
+    """
+    将 Duck 服务里的 receiver_service_id 解析为可直接初始化的收件后端配置。
+    """
+    if not isinstance(duck_config, dict):
+        return duck_config or {}
+
+    resolved = duck_config.copy()
+    receiver_service_id = resolved.get("receiver_service_id")
+    if receiver_service_id in (None, "", 0, "0"):
+        return resolved
+
+    try:
+        receiver_service_id = int(receiver_service_id)
+    except Exception:
+        raise ValueError(f"Duck 收件后端服务 ID 无效: {receiver_service_id}")
+
+    from ...database.models import EmailService as EmailServiceModel
+    receiver_service = db.query(EmailServiceModel).filter(
+        EmailServiceModel.id == receiver_service_id,
+        EmailServiceModel.enabled == True,
+    ).first()
+    if not receiver_service:
+        raise ValueError(f"Duck 收件后端服务不存在或已禁用: {receiver_service_id}")
+
+    try:
+        receiver_type = EmailServiceType(receiver_service.service_type)
+    except Exception:
+        raise ValueError(f"Duck 收件后端类型不受支持: {receiver_service.service_type}")
+
+    if receiver_type == EmailServiceType.DUCK_MAIL:
+        raise ValueError("Duck 收件后端不能再使用 DuckMail，请选择 CloudMail/TempMail/自定义域名等服务")
+
+    receiver_cfg = _normalize_email_service_config(receiver_type, receiver_service.config or {}, proxy_url)
+    receiver_inbox_email = str(resolved.get("receiver_inbox_email") or "").strip()
+    if receiver_inbox_email:
+        receiver_cfg.setdefault("inbox_email", receiver_inbox_email)
+
+    resolved["receiver_service_id"] = receiver_service.id
+    resolved["receiver_service_type"] = receiver_type.value
+    resolved["receiver_service_name"] = receiver_service.name or EMAIL_SERVICE_LABELS.get(receiver_type.value, receiver_type.value)
+    resolved["receiver_service_config"] = receiver_cfg
+    return resolved
 
 
 def _run_sync_registration_task(
@@ -349,7 +412,7 @@ def _run_sync_registration_task(
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int] = None,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     log_prefix: str = "",
     batch_id: str = "",
     auto_upload_cpa: bool = False,
@@ -532,6 +595,9 @@ def _run_sync_registration_task(
                 else:
                     config = email_service_config or {}
                     service_name = EMAIL_SERVICE_LABELS.get(service_type.value, service_type.value)
+
+            if service_type == EmailServiceType.DUCK_MAIL:
+                config = _resolve_duck_receiver_service_config(db, config, actual_proxy_url)
 
             # 创建注册引擎 - 使用 TaskManager 的日志回调
             log_callback = task_manager.create_log_callback(task_uuid, prefix=log_prefix, batch_id=batch_id)
@@ -832,7 +898,7 @@ async def run_registration_task(
     proxy: Optional[str],
     email_service_config: Optional[dict],
     email_service_id: Optional[int] = None,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     log_prefix: str = "",
     batch_id: str = "",
     auto_upload_cpa: bool = False,
@@ -922,7 +988,7 @@ async def run_batch_parallel(
     email_service_config: Optional[dict],
     email_service_id: Optional[int],
     concurrency: int,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
@@ -1006,7 +1072,7 @@ async def run_batch_pipeline(
     interval_min: int,
     interval_max: int,
     concurrency: int,
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
@@ -1183,7 +1249,7 @@ async def run_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     email_service_pool: Optional[List[Tuple[str, Optional[int]]]] = None,
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
@@ -1564,8 +1630,7 @@ async def get_available_email_services():
     获取可用于注册的邮箱服务列表
 
     返回所有已启用的邮箱服务，包括：
-    - tempmail: 临时邮箱（无需配置）
-    - generator_email: 临时邮箱（无需配置）
+    - tempmail: 临时邮箱渠道（Tempmail.lol / Generator.email，当前版本默认隐藏）
     - outlook: 已导入的 Outlook 账户
     - custom_domain: 已配置的自定义域名服务
     - temp_mail: 自部署 Temp-Mail 服务
@@ -1578,19 +1643,9 @@ async def get_available_email_services():
     settings = get_settings()
     result = {
         "tempmail": {
-            "available": True,
-            "count": 2,
-            "services": [{
-                "id": None,
-                "name": "Tempmail.lol",
-                "type": "tempmail",
-                "description": "临时邮箱，自动创建"
-            }, {
-                "id": None,
-                "name": "Generator.email",
-                "type": "generator_email",
-                "description": "临时邮箱，自动创建"
-            }]
+            "available": False,
+            "count": 0,
+            "services": []
         },
         "outlook": {
             "available": False,
@@ -1792,7 +1847,7 @@ async def run_outlook_batch_registration(
     interval_max: int,
     concurrency: int = 1,
     mode: str = "pipeline",
-    token_mode: str = "browser",
+    token_mode: str = "browser_http_only",
     auto_upload_cpa: bool = False,
     cpa_service_ids: List[int] = None,
     auto_upload_sub2api: bool = False,
